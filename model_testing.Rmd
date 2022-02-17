@@ -1,0 +1,134 @@
+---
+title: "Peak Bloom Prediction Demo"
+author: "Eager Learner"
+date: "01/01/2022"
+output:
+  html_document:
+    df_print: kable
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, error = FALSE, 
+                      message = FALSE,
+                      fig.align = 'center',
+                      out.width = '80%')
+```
+
+## Instructions
+
+In this analysis we demonstrate a very simple way of predicting the peak bloom date in the coming decade for all four locations required by the competition.
+The models used here are very simple and are using only the historic data for these four locations, but no other information or covariates.
+At the end of this document ((#appendix-rnoaa)[Appendix A]), we also demonstrate a simple way to get historic temperature data for the four locations via the `rnoaa` package.
+
+
+```{r}
+library(tidyverse)
+library(caret)
+```
+
+
+## Loading the data
+
+The data for each of the three main sites is provided as simple text file in CSV format.
+Each file contains the dates of the peak bloom of the cherry trees at the respective site, alongside the geographical location of the site.
+
+The six columns in each data file are
+
+* _location_ a human-readable location identifier (`string`).
+* _lat_ (approximate) latitude of the cherry trees (`double`).
+* _long_ (approximate) longitude of the cherry trees (`double`).
+* _alt_ (approximate) altitude of the cherry trees (`double`).
+* _year_ year of the observation (`integer`).
+* *bloom_date* date of peak bloom of the cherry trees (ISO 8601 date `string`). The "peak bloom date" may be defined differently for different sites
+* *bloom_doy* days since January 1st of the year until peak bloom (`integer`). January 1st corresponds to `1`.
+
+In R, the data files can be read with `read.csv()` and concatenated with the `bind_rows()` function:
+
+```{r}
+cherry <- read.csv("data/washingtondc.csv") %>% 
+  bind_rows(read.csv("data/liestal.csv")) %>% 
+  bind_rows(read.csv("data/kyoto.csv"))
+```
+
+
+## Visualizing the time series
+
+
+```{r, fig.width=8, fig.height=3, out.width='100%', fig.cap="Time series of peak bloom of cherry trees since 1880 at three different sites."}
+cherry %>% 
+  filter(year >= 1880) %>%
+  ggplot(aes(x = year, y = bloom_doy)) +
+  geom_point() +
+  geom_step(linetype = 'dotted', color = 'gray50') +
+  scale_x_continuous(breaks = seq(1880, 2020, by = 20)) +
+  facet_grid(cols = vars(str_to_title(location))) +
+  labs(x = "Year", y = "Peak bloom (days since Jan 1st)")
+```
+
+
+
+```{r}
+library(rnoaa)
+```
+
+The list of stations can be retrieved using the `ghcnd_stations()` function. Note that the closest weather station to each city with continuously collected maximum temperatures are USC00186350 (Washington D.C.), GME00127786 (Liestal), JA000047759 (Kyoto), and CA001108395 (Vancouver).
+
+```{r, eval = FALSE}
+stations <- ghcnd_stations()
+```
+
+As a simple demonstration, we retrieve the average seasonal maximum daily temperature (in 1/10 °C) from these stations using our own `get_temperature()` function, which wraps the `ghcnd_search()` function in the `rnoaa` package. (N.b. `ghcnd_search()` returns a list. Each element of the list corresponds to an element of the `var` argument.)
+
+```{r}
+#' Get the annual average maximum temperature at the given station,
+#' separated into the 4 meteorological seasons (Winter, Spring, Summer, Fall).
+#' 
+#' The seasons are span 3 months each.
+#' Winter is from December to February, Spring from March to May,
+#' Summer from June to August, and Fall from September to November.
+#' Note that December is counted towards the Winter of the next year, i.e.,
+#' temperatures in December 2020 are accounted for in Winter 2021.
+#' 
+#' @param stationid the `rnoaa` station id (see [ghcnd_stations()])
+#' @return a data frame with columns
+#'   - `year` ... the year of the observations
+#'   - `season` ... the season (Winter, Spring, Summer, Fall)
+#'   - `tmax_avg` ... average maximum temperate in tenth degree Celsius
+get_temperature <- function (stationid) {
+  ghcnd_search(stationid = stationid, var = c("tmax"), 
+               date_min = "1950-01-01", date_max = "2022-01-31")[[1]] %>%
+  mutate(year = as.integer(format(date, "%Y")),
+         month = as.integer(strftime(date, '%m')) %% 12, # make December "0"
+         season = cut(month, breaks = c(0, 2, 5, 8, 11),
+                      include.lowest = TRUE,
+                      labels = c("Winter", "Spring", "Summer", "Fall")),
+         year = if_else(month == 0, year + 1L, year)) %>%
+  group_by(year, season) %>%
+  summarize(tmax_avg = mean(tmax, na.rm = TRUE))
+}
+
+historic_temperatures <-
+  tibble(location = "washingtondc", get_temperature("USC00186350")) %>%
+  bind_rows(tibble(location = "liestal", get_temperature("GME00127786"))) %>%
+  bind_rows(tibble(location = "kyoto", get_temperature("JA000047759"))) %>%
+  bind_rows(tibble(location = "vancouver", get_temperature("CA001108395"))) %>%
+  pivot_wider(names_from = season, names_prefix = "temp_", values_from = tmax_avg)
+
+```
+
+We then predict the peak bloom date in two steps. Step 1 extrapolates average winter and spring temperature until 2031 using simple linear regression. Step 2 predicts the peak bloom date given the extrapolated temperatures, again using simple linear regression. 
+
+```{r}
+
+
+cherry_temp <- left_join(cherry, historic_temperatures, by = c("location", "year"))
+
+train(x = select(cherry_temp, year, location, temp_Winter, temp_Spring,temp_Summer, temp_Fall),
+      y = cherry_temp$bloom_doy,
+      method="gbm",
+      metric = "RMSE")
+
+
+```
+
+
