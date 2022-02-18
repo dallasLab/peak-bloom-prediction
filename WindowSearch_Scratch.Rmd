@@ -1,0 +1,188 @@
+---
+title: "Window Search Scratch Work"
+author: "Grant Foster"
+date: "01/01/2022"
+output:
+  html_document:
+    df_print: kable
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, error = FALSE, 
+                      message = FALSE,
+                      fig.align = 'center',
+                      out.width = '80%')
+```
+
+If you don't have these, install them to run this code!
+```{r}
+library(tidyverse)
+#install.packages("rnoaa")
+library(rnoaa)
+library(magrittr)
+library(randomForest)
+```
+
+Read in the cherry data
+```{r}
+cherry <- read.csv("data/washingtondc.csv") %>% 
+  bind_rows(read.csv("data/liestal.csv")) %>% 
+  bind_rows(read.csv("data/kyoto.csv"))
+```
+
+Query weather station data based on Cleber's code!
+```{r}
+func <- function(stationid, outputname){
+  value <- rnoaa::ghcnd_search(stationid = stationid, var = c("tmax"), #Grab T_max data
+                 date_min = "1950-01-01", date_max = "2022-01-31")[[1]] %>% dplyr::select(., tmax, date) %>% data.frame(.)
+    colnames(value) <- c(outputname, "date")
+  return(value)
+}
+
+
+historic_temperatures <- func("USC00186350", "Washington_Tmax") %>%
+  left_join(., func("GME00127786", "Liestal_Tmax"), by="date") %>%
+  left_join(., func("JA000047759", "Kyoto_Tmax"), by="date") %>%
+  left_join(., func("CA001108395", "Vancouver_Tmax"), by="date")
+```
+
+Aside: Yo, what do we do with leap years?
+
+This creates a date index, where "1" is September 1st, all the way to to "211" on March 9th. It also creates an "effective year" column, which groups dates based on the value bloom they're relevant to (i.e. fall temperatures from 1959 are grouped with spring temperatures from 1960 to predict the 1960 bloom). 
+
+A notable thing is that I'm indexing based on date, not distance from bloom. Since we won't really know the distance from bloom in the actual data, I think this is more appropriate? 
+```{r}
+historic_temperatures$year <- format(historic_temperatures$date, format="%Y")
+historic_temperatures$dayindex <- as.integer(as.factor(format(historic_temperatures$date, format="%m%d")))
+
+historic_temperatures$eff_year <- 0
+historic_temperatures %<>% dplyr::filter(., dayindex<90 | dayindex>244) #60 = Filter out end of march to end of august. 
+
+historic_temperatures$eff_year[historic_temperatures$dayindex>90] <- as.numeric(historic_temperatures$year[historic_temperatures$dayindex>90])-1 #Reference based on bloom year
+historic_temperatures$eff_year[historic_temperatures$dayindex<90] <- as.numeric(historic_temperatures$year[historic_temperatures$dayindex<90])
+
+historic_temperatures$dayindex <- historic_temperatures$dayindex-244
+
+table(historic_temperatures$dayindex)
+
+historic_temperatures$dayindex[historic_temperatures$dayindex<0] <- (historic_temperatures$dayindex[historic_temperatures$dayindex<0]+max(historic_temperatures$dayindex)+244)
+
+table(historic_temperatures$dayindex, historic_temperatures$eff_year)
+
+cherry$bloom_doy <- cherry$bloom_doy+122 #Our renumbered day system starts with 123 as January 1st
+```
+
+Maybe try to put something into a model?
+```{r}
+windowsearch <- function(window_length){
+  output <- NULL
+  for(i in 1:(max(historic_temperatures$dayindex)-window_length-1)){ #Run from Sept 1st to Last day of March
+    x_Wash <- dplyr::filter(historic_temperatures, dayindex >= i & dayindex <= i+window_length-1) %>% group_by(., eff_year) %>% summarise(., temp=mean(Washington_Tmax, na.rm=TRUE)) %>% mutate(., location="washingtondc") #Get mean value for our temperature data for washington. This is taking the mean value of maximum temperature within our window. 
+    
+    x_Lie <- dplyr::filter(historic_temperatures, dayindex >= i & dayindex <= i+window_length-1) %>% group_by(., eff_year) %>% summarise(., temp=mean(Liestal_Tmax, na.rm=TRUE)) %>% mutate(., location="liestal")
+    
+    x_Kyo <- dplyr::filter(historic_temperatures, dayindex >= i & dayindex <= i+window_length-1) %>% group_by(., eff_year) %>% summarise(., temp=mean(Kyoto_Tmax, na.rm=TRUE))%>% mutate(., location="kyoto")
+    
+    trio <- rbind(x_Wash, x_Lie, x_Kyo) %>% dplyr::rename(., year=eff_year) #Bind our mean into one dataframe that can be joined with our bloom dataframe
+    
+    joined <- left_join(cherry, trio, by=c("year", "location")) #Join with bloom dataframe
+    joined$location <- as.factor(joined$location) #Make sure our location is a factor
+
+    forest <- joined %>% dplyr::filter(., is.na(temp)==FALSE) %>% randomForest::randomForest(bloom_doy~temp+location, data=.)
+    output <- rbind(output, c(summary(lm(bloom_doy~temp+location+temp*location, data=joined))$r.squared, mean(forest$rsq), i)) #Add a row to our output with 1) our r.squared, and 2) the starting date of our moving window
+
+  }
+  output <- as.data.frame(output)
+  colnames(output) <- c("lm_rsq","forest_rsq", "window_start")
+  return(output)
+}
+
+tmax_regression_30 <- windowsearch(30)
+
+tmax_regression_15 <- windowsearch(15)
+
+
+plot(x=tmax_regression_30$window_start, y=tmax_regression_30$lm_rsq, xlab="Window Start", ylab="R.Squared", main="Average maximum temp in window; Window=30", ylim=c(0,1.0))
+lines(x=c(0,30), y=c(0.5, 0.5), col="red")
+lines(x=tmax_regression_30$window_start, y=tmax_regression_30$forest_rsq)
+
+plot(x=tmax_regression_15$window_start, y=tmax_regression_15$lm_rsq, xlab="Window Start", ylab="R.Squared", main="Average maximum temp in window; Window=15", ylim=c(0,1.0))
+lines(x=c(0,15), y=c(0.5, 0.5), col="red")
+lines(x=tmax_regression_15$window_start, y=tmax_regression_15$forest_rsq)
+```
+Double Windows
+```{r}
+#' Double window search for mean maximum temperature. Independently walks a spring and fall window across the time series, takes the mean value of Maximum daily temperature for each window and uses those two values to inform a linear and randomf forest model. Outputs the R^2 of both for comparison.
+#'
+#' @window_length Length of each window (as written must be the same). 
+#' @fall_windowstart & @spring_windowstart : The first day of each window
+#' @fall_windowstop & @spring_windowstop: The last day of each window; the starting value will be this number - windowlength -1
+
+
+#' @output Dataframe that returns r_squared values for each model, as well as the dat index each window started on. 
+
+Doublewindow <- function(window_length, seq_by=1, fall_windowstart, fall_windowstop, spring_windowstart, spring_windowstop){
+  output <- NULL
+  #####Outer loop: Spring!
+    for(j in seq(spring_windowstart, (spring_windowstop-window_length-1), by=seq_by)){ 
+      s_Wash <- dplyr::filter(historic_temperatures, dayindex >= j & dayindex <= j+window_length-1) %>% group_by(., eff_year) %>% summarise(., spring_mean=mean(Washington_Tmax, na.rm=TRUE)) %>% mutate(., location="washingtondc") #Get mean value for our temperature data for washington. This is taking the mean value of maximum temperature within our window. 
+    
+    s_Lie <- dplyr::filter(historic_temperatures, dayindex >= j & dayindex <= j+window_length-1) %>% group_by(., eff_year) %>% summarise(., spring_mean=mean(Liestal_Tmax, na.rm=TRUE)) %>% mutate(., location="liestal")
+    
+    s_Kyo <- dplyr::filter(historic_temperatures, dayindex >= j & dayindex <= j+window_length-1) %>% group_by(., eff_year) %>% summarise(., spring_mean=mean(Kyoto_Tmax, na.rm=TRUE))%>% mutate(., location="kyoto")
+    
+    s_trio <- rbind(s_Wash, s_Lie, s_Kyo) %>% dplyr::rename(., year=eff_year)
+      
+    
+    
+    #####Inner Loop: Fall!
+      for(i in seq(fall_windowstart, (fall_windowstop-window_length-1), by=seq_by)){ #Run from Sept 1st to Last day that includes all of our fall window
+        f_Wash <- dplyr::filter(historic_temperatures, dayindex >= i & dayindex <= i+window_length-1) %>% group_by(., eff_year) %>% summarise(., fall_mean=mean(Washington_Tmax, na.rm=TRUE)) %>% mutate(., location="washingtondc") #Get mean value for our temperature data for washington. This is taking the mean value of maximum temperature within our window. 
+        
+        f_Lie <- dplyr::filter(historic_temperatures, dayindex >= i & dayindex <= i+window_length-1) %>% group_by(., eff_year) %>% summarise(., fall_mean=mean(Liestal_Tmax, na.rm=TRUE)) %>% mutate(., location="liestal")
+        
+        f_Kyo <- dplyr::filter(historic_temperatures, dayindex >= i & dayindex <= i+window_length-1) %>% group_by(., eff_year) %>% summarise(., fall_mean=mean(Kyoto_Tmax, na.rm=TRUE))%>% mutate(., location="kyoto")
+        
+        f_trio <- rbind(f_Wash, f_Lie, f_Kyo) %>% dplyr::rename(., year=eff_year) #Bind our mean into one dataframe that can be joined with our bloom dataframe
+        
+        
+        
+     ######Put them together          
+        joined <- left_join(cherry, f_trio, by=c("year", "location")) #Join fall with bloom dataframe
+        joined <- left_join(joined, s_trio, by=c("year", "location")) #Join Spring with bloom dataframe
+        joined$location <- as.factor(joined$location) #Make sure our location is a factor
+    
+        forest <- joined %>% dplyr::filter(., is.na(spring_mean)==FALSE & is.na(fall_mean)==FALSE) %>% randomForest::randomForest(bloom_doy~spring_mean+fall_mean+location, data=.) #Remove missing rows, then train random forest model
+        linmod <- lm(bloom_doy~fall_mean+spring_mean+location*spring_mean+location*fall_mean, data=joined) #Train a linear model, including interaction terms with location
+        output <- rbind(output, c(summary(linmod)$r.squared, mean(forest$rsq), as.integer(i), as.integer(j))) #save the output of each model, along with the window starting points for each.
+      }
+  }
+  output <- as.data.frame(output)
+  colnames(output) <- c("lm_rsq","forest_rsq", "fall_window_start", "spring_window_start")
+  return(output)
+}
+
+tictoc::tic()
+Double_tmax_30s <- Doublewindow(window_length = 30, seq_by=2, fall_windowstart=1, fall_windowstop=40, spring_windowstart=160, spring_windowstop=200)
+tictoc::toc()
+
+#Took about 17s to do 100. If I expand my window to 70x70, that should take about 15minutes. 
+```
+
+```{r}
+ggplot(data=Double_tmax_30s, aes(x=fall_window_start, y=spring_window_start, fill=lm_rsq))+geom_tile()+ggtitle("Double Tmax Mini Window Search for LM:30")
+
+ggplot(data=Double_tmax_30s, aes(x=fall_window_start, y=spring_window_start, fill=forest_rsq))+geom_tile()+ggtitle("Double Tmax Mini Window Search for RF:30")
+```
+```{r}
+tictoc::tic()
+Double_tmax_30 <- Doublewindow(window_length = 30, seq_by=5, fall_windowstart=1, fall_windowstop=110, spring_windowstart=115, spring_windowstop=210)
+tictoc::toc()
+```
+
+```{r}
+object <- ggplot(data=Double_tmax_30, aes(x=fall_window_start, y=spring_window_start, fill=lm_rsq))+geom_tile()+ggtitle("Double Tmax Full Window Search for LM:30")
+
+ggplot(data=Double_tmax_30, aes(x=fall_window_start, y=spring_window_start, fill=forest_rsq))+geom_tile()+ggtitle("Double Tmax Full Window Search for RF:30")
+```
+
