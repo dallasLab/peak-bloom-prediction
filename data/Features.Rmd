@@ -1,0 +1,156 @@
+---
+title: "Feature Creation"
+author: "Grant Foster"
+date: "2/17/2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r}
+library(tidyverse)
+```
+
+```{r}
+cherry <- read.csv("../data/washingtondc.csv") %>% 
+  bind_rows(read.csv("../data/liestal.csv")) %>% 
+  bind_rows(read.csv("../data/kyoto.csv"))
+
+cherry <- dplyr::filter(cherry, year >1950)
+```
+
+
+```{r}
+historic_covs <- read.table(file="../data/covariates/historic_climate.txt")
+historic_covs <- dplyr::filter(historic_covs, year >= 1950)
+```
+
+
+```{r}
+historic_covs <- dplyr::filter(historic_covs, month <5 | month >8)
+historic_covs$cherry_year <- 0
+
+historic_covs$cherry_year[historic_covs$month >8] <- historic_covs$year[historic_covs$month >8]+1
+
+historic_covs$cherry_year[historic_covs$month <8] <- historic_covs$year[historic_covs$month <8]
+```
+
+1) Function for the Number of Days in the Time Series (or Month) that meets a given criteria
+```{r}
+#' For each year-site combination, counts the number of days in historic_covs that meet a certain condition. 
+#' Relies on historic coves to be loaded in environment
+#' Default is to search across the entire time series, but optional @month_input param allows you to only search within a given month instead. 
+
+#' @param condition. Counts the number of days that meet this condition (ex. tmax <0)
+#' @param columnName. The name of the column of counts
+#' @param month_input. Allows you to search over a particular month, encoded as an integer 1-12. Leaving this blank will search over the entire year
+
+#' @output A three column dataframe containing the following
+#' "year": The year that the covariate is relevant to (i.e. Temperatures in the winter of 1951 will be labeled as 1952, since that's the bloom they effect)
+#' "location"
+#' "columnName": Your output value; if left joined to "cherry" above, this will be the only added column
+
+
+countDays <- function(condition, columnName, month_input=NA){
+  if(is.na(month_input)==TRUE){
+output <- historic_covs %>% group_by(., cherry_year, location) %>% summarise(., temp=length(which({{condition}}))) #
+colnames(output) <- c("year", "location", columnName)
+return(output)
+  }
+  else{
+    set <- dplyr::filter(historic_covs, month==month_input)
+    output <- set %>% group_by(., cherry_year, location) %>% summarise(., temp=length(which({{condition}}))) #
+    colnames(output) <- c("year", "location", columnName)
+    return(output)
+  }
+}
+
+#Example: Count the number of total days below 0
+cherry <- countDays(tmax<0, columnName="DaysSub0") %>% left_join(cherry, ., by=c("year", "location")) 
+
+#Example 2: Count the number of total days below 0 in December
+cherry <- countDays(tmax<0, columnName="DecDaysSub0", month=12) %>% left_join(cherry, ., by=c("year", "location")) 
+
+```
+
+2) Function for the First Day of the Time Series (or Month) that meets a given criteria
+
+Note:This is returned in C_Day, the unique day identifier.
+```{r}
+#' For each year-site combination, returns the first day in historic_covs that meet a certain condition. 
+#' Returned value is in terms of C_day, which is the unique day identifier for each year
+#' If no day in the designated time series meets the criteria, returns NA
+#' Relies on historic coves to be loaded in environment
+#' Default is to search across the entire time series, but optional @month_input param allows you to only search within a given month instead. 
+
+#' params and outputs follow same convention as @countDays
+
+firstDay <- function(condition, columnName, month_input=NA){
+  if(is.na(month_input)==TRUE){
+output <- historic_covs %>% group_by(., cherry_year, location) %>% summarise(., temp=C_day[min(which({{condition}}))]) #
+ output$temp[is.infinite(output$temp)==TRUE] <- NA
+colnames(output) <- c("year", "location", columnName)
+  }
+  else{
+    set <- dplyr::filter(historic_covs, month==month_input)
+    output <- set %>% group_by(., cherry_year, location) %>% summarise(., temp=C_day[min(which({{condition}}))]) #
+    output$temp[is.infinite(output$temp)==TRUE] <- NA
+    colnames(output) <- c("year", "location", columnName)
+  }
+  return(output)
+}
+
+firstDay(condition=tmax<0, columnName="FirstSub0")
+firstDay(condition=tmax<0, columnName="FirstDecSub0", 12)
+
+
+
+#Example: Record the First Day of each Growing Season (September-April) that falls below 0
+cherry <- firstDay(tmax<0, columnName="FirstSub0") %>% left_join(cherry, ., by=c("year", "location")) 
+
+#Example 2: Count the number of total days below 0 in December
+cherry <- firstDay(tmax<0, columnName="FirstDecSub0", month=12) %>% left_join(cherry, ., by=c("year", "location")) 
+```
+
+3) Function for the Number of consecutive days under or over a certain threshold.
+
+(Note: This function throws warnings from the max function each time you have a year-site combination that doesn't meet the criteria, which can be a lot)
+```{r}
+#' For each year-site combination, returns the number of consecutive days in historic_covs that meet a certain condition. 
+#' Relies on historic coves to be loaded in environment
+#' Default is to search across the entire time series, but optional @month_input param allows you to only search within a given month instead. 
+
+#' params and outputs follow same convention as @countDays
+
+consecDays <- function(condition, columnName, month_input=NA){
+  if(is.na(month_input)==TRUE){
+  output <- historic_covs %>% group_by(., cherry_year, location) %>% 
+    summarise(., temp=max(rle({{condition}})$length[rle({{condition}})$values==TRUE], na.rm=TRUE)) #
+    output$temp[is.infinite(output$temp)==TRUE] <- 0
+colnames(output) <- c("year", "location", columnName)
+  }
+  else{
+    set <- dplyr::filter(historic_covs, month==month_input)
+    output <- set %>% group_by(., cherry_year, location) %>% 
+    summarise(., temp=max(rle({{condition}})$length[rle({{condition}})$values==TRUE], na.rm=TRUE)) #
+    output$temp[is.infinite(output$temp)==TRUE] <- 0
+colnames(output) <- c("year", "location", columnName)
+  }
+  return(output)
+}
+
+
+cherry <- consecDays(tmax<0, columnName = "SeqSub0") %>% left_join(cherry, ., by=c("year", "location")) 
+
+#Ex 1. Find longest consecutive number of days in January T_max is below 0
+cherry <- consecDays(tmax<0, columnName = "JanSeqSub0", month_input = 1) %>% left_join(cherry, ., by=c("year", "location")) 
+```
+
+Note that you can include multiple operations in the "condition" argument of each function
+```{r}
+consecDays(condition = tmax>0 & tmax <5, columnName = "Above0Sub5consec")
+```
+
