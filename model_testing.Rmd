@@ -119,16 +119,70 @@ historic_temperatures <-
 We then predict the peak bloom date in two steps. Step 1 extrapolates average winter and spring temperature until 2031 using simple linear regression. Step 2 predicts the peak bloom date given the extrapolated temperatures, again using simple linear regression. 
 
 ```{r}
+library(gbm)
+library(dismo)
 
+vancouver_cov <- filter(historic_temperatures, location == "vancouver") %>%
+  drop_na()%>%
+  mutate(lat = 49.2237, long = -123.1636)
 
-cherry_temp <- left_join(cherry, historic_temperatures, by = c("location", "year"))
+cherry_temp <- left_join(cherry, historic_temperatures, by = c("location", "year")) %>%
+  drop_na() %>%
+  dplyr::select( year, lat, long, temp_Winter, temp_Spring,temp_Summer, temp_Fall, bloom_doy)
 
-train(x = select(cherry_temp, year, location, temp_Winter, temp_Spring,temp_Summer, temp_Fall),
+trControl <- trainControl(method = "cv", number = 10)
+
+tuneGrid <- expand.grid(interaction.depth = c(1,3,5),n.trees = (5:10)*100, shrinkage = c(.1,.01), n.minobsinnode =10)
+
+fullMod <- train(x = cherry_temp[,1:7],
       y = cherry_temp$bloom_doy,
+      distribution = "gaussian",
       method="gbm",
-      metric = "RMSE")
+      metric = "RMSE",
+      tuneGrid = tuneGrid,
+      trControl = trControl)
+plot(predict(mod, newData= vancouver_cov))
 
+summary(mod)
 
 ```
 
+```{r, variable selection}
+cherry_test <- cherry_temp %>%
+  filter(year == 2020)
 
+cherry_train <- cherry_temp %>%
+  filter(year <2020)
+
+fullmod <- train(x = cherry_train[,1:7],
+      y = cherry_train$bloom_doy,
+      distribution = "gaussian",
+      method="gbm",
+      metric = "RMSE",
+      tuneGrid = tuneGrid,
+      trControl = trControl)
+
+summary(mod)
+
+predictions <- predict(fullmod, cherry_test)
+RMSE_Full <- sqrt(mean((cherry_test$bloom_doy - predictions)^2))
+  
+
+RMSE <- c()
+for(i in 1:ncol(cherry_test)-1){
+  vars <- 1:ncol(cherry_test)-1
+  vars <- vars[-i]
+  mod <- train(x = cherry_train[,vars],
+      y = cherry_train$bloom_doy,
+      distribution = "gaussian",
+      method="gbm",
+      metric = "RMSE",
+      tuneGrid = tuneGrid,
+      trControl = trControl)
+  predictions <- predict(mod, cherry_test)
+  RMSE[i] <- sqrt(mean((cherry_test$bloom_doy - predictions)^2))
+  
+}
+
+
+```
