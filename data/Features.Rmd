@@ -11,6 +11,7 @@ knitr::opts_chunk$set(echo = TRUE)
 
 
 ```{r}
+#install.packages(tidyverse)
 library(tidyverse)
 ```
 
@@ -20,22 +21,35 @@ cherry <- read.csv("../data/washingtondc.csv") %>%
   bind_rows(read.csv("../data/kyoto.csv"))
 
 cherry <- dplyr::filter(cherry, year >1950)
+
+cherry$bloom_doy <- cherry$bloom_doy + 188 #Set Bloom day to be as same scale as climate data
+
+cherry2 <- cherry
 ```
 
+September 1st C_day is 244. 
+
+Read in historic climate data.
 
 ```{r}
 historic_covs <- read.table(file="../data/covariates/historic_climate.txt")
 historic_covs <- dplyr::filter(historic_covs, year >= 1950)
 ```
-
-
+Assign a "cherry year" to match winter weather with spring blooms. 
 ```{r}
 historic_covs <- dplyr::filter(historic_covs, month <5 | month >8)
 historic_covs$cherry_year <- 0
 
 historic_covs$cherry_year[historic_covs$month >8] <- historic_covs$year[historic_covs$month >8]+1
-
 historic_covs$cherry_year[historic_covs$month <8] <- historic_covs$year[historic_covs$month <8]
+```
+
+C_day as read in is unique integer identifier, where 1=Jan first. Below I reset to where September 1st is equal to 1, so that the climate dates relevant for a given bloom year are 1-243. 
+
+```{r}
+historic_covs$C_day <- historic_covs$C_day-243 #Set Sept1-Dec31 as 1-122
+
+historic_covs$C_day[historic_covs$C_day<0] <- historic_covs$C_day[historic_covs$C_day<0] - min(historic_covs$C_day) + max(historic_covs$C_day)  
 ```
 
 1) Function for the Number of Days in the Time Series (or Month) that meets a given criteria
@@ -90,13 +104,13 @@ Note:This is returned in C_Day, the unique day identifier.
 
 firstDay <- function(condition, columnName, month_input=NA){
   if(is.na(month_input)==TRUE){
-output <- historic_covs %>% group_by(., cherry_year, location) %>% summarise(., temp=C_day[min(which({{condition}}))]) #
+output <- historic_covs %>% group_by(., cherry_year, location) %>% summarise(., temp=C_day[min(which({{condition}}), na.rm = TRUE)]) #
  output$temp[is.infinite(output$temp)==TRUE] <- NA
 colnames(output) <- c("year", "location", columnName)
   }
   else{
     set <- dplyr::filter(historic_covs, month==month_input)
-    output <- set %>% group_by(., cherry_year, location) %>% summarise(., temp=C_day[min(which({{condition}}))]) #
+    output <- set %>% group_by(., cherry_year, location) %>% summarise(., temp=C_day[min(which({{condition}}), na.rm=TRUE)]) #
     output$temp[is.infinite(output$temp)==TRUE] <- NA
     colnames(output) <- c("year", "location", columnName)
   }
@@ -130,6 +144,7 @@ consecDays <- function(condition, columnName, month_input=NA){
   output <- historic_covs %>% group_by(., cherry_year, location) %>% 
     summarise(., temp=max(rle({{condition}})$length[rle({{condition}})$values==TRUE], na.rm=TRUE)) #
     output$temp[is.infinite(output$temp)==TRUE] <- 0
+    output$temp[is.na(output$temp)==TRUE] <- 0 #I think this is correct; let me make sure!
 colnames(output) <- c("year", "location", columnName)
   }
   else{
@@ -152,5 +167,108 @@ cherry <- consecDays(tmax<0, columnName = "JanSeqSub0", month_input = 1) %>% lef
 Note that you can include multiple operations in the "condition" argument of each function
 ```{r}
 consecDays(condition = tmax>0 & tmax <5, columnName = "Above0Sub5consec")
+```
+
+Create covariates. Creates a total of 39 as of now. 
+```{r}
+
+cherry <- cherry2
+#Cumulative Thresholds
+
+## Above
+### Total Time Series
+
+cherry <- countDays(tmax>0, columnName = "TmaxDaysAbove0") %>% left_join(cherry, ., by=c("year", "location")) 
+cherry <- countDays(tmax>5, columnName = "TmaxDaysAbove5") %>% left_join(cherry, ., by=c("year", "location")) 
+cherry <- countDays(tmax>10, columnName = "TmaxDaysAbove10") %>% left_join(cherry, ., by=c("year", "location")) 
+cherry <- countDays(tmax>20, columnName = "TmaxDaysAbove20") %>% left_join(cherry, ., by=c("year", "location")) 
+cherry <- countDays(tmax>25, columnName = "TmaxDaysAbove25") %>% left_join(cherry, ., by=c("year", "location")) 
+
+cherry <- countDays(tmin>0, columnName = "TminDaysAbove0") %>% left_join(cherry, ., by=c("year", "location")) 
+cherry <- countDays(tmin>5, columnName = "TminDaysAbove5") %>% left_join(cherry, ., by=c("year", "location")) 
+cherry <- countDays(tmin>10, columnName = "TminDaysAbove10") %>% left_join(cherry, ., by=c("year", "location")) 
+
+cherry <- countDays(prcp>0, columnName = "PrcpDays") %>% left_join(cherry, ., by=c("year", "location")) 
+
+### Months
+cherry <- countDays(tmax>0, columnName = "TmaxDecAbove0", month=12) %>% left_join(cherry, ., by=c("year", "location")) 
+cherry <- countDays(tmax>0, columnName = "TmaxJanAbove0", month=1) %>% left_join(cherry, ., by=c("year", "location")) 
+cherry <- countDays(tmax>0, columnName = "TmaxFebAbove0", month=12) %>% left_join(cherry, ., by=c("year", "location")) 
+
+cherry <- countDays(prcp>0, columnName = "DecPrcpDays", month=12) %>% left_join(cherry, ., by=c("year", "location")) 
+cherry <- countDays(prcp>0, columnName = "JanPrcpDays", month=1) %>% left_join(cherry, ., by=c("year", "location")) 
+cherry <- countDays(prcp>0, columnName = "FebPrcpDays", month=2) %>% left_join(cherry, ., by=c("year", "location")) 
+
+
+## Below
+cherry <- countDays(tmax<0, columnName = "TmaxDaysSub0") %>% left_join(cherry, ., by=c("year", "location")) 
+cherry <- countDays(tmax<5, columnName = "TmaxDaysSub5") %>% left_join(cherry, ., by=c("year", "location")) 
+cherry <- countDays(tmax<10, columnName = "TmaxDaysSub10") %>% left_join(cherry, ., by=c("year", "location")) 
+cherry <- countDays(tmax<20, columnName = "TmaxDaysSub20") %>% left_join(cherry, ., by=c("year", "location")) 
+cherry <- countDays(tmax<25, columnName = "TmaxDaysSub25") %>% left_join(cherry, ., by=c("year", "location")) 
+
+cherry <- countDays(tmin<0, columnName = "TminDaysSub0") %>% left_join(cherry, ., by=c("year", "location")) 
+cherry <- countDays(tmin<5, columnName = "TminDaysSub5") %>% left_join(cherry, ., by=c("year", "location")) 
+cherry <- countDays(tmin<8, columnName = "TminDaysSub8") %>% left_join(cherry, ., by=c("year", "location")) 
+cherry <- countDays(tmin<10, columnName = "TminDaysSub10") %>% left_join(cherry, ., by=c("year", "location")) 
+
+#First Day Thresholds
+#Full Time Series
+cherry <- firstDay(tmax<7, columnName = "FirstTmaxSub7") %>% left_join(cherry, ., by=c("year", "location")) 
+cherry <- firstDay(tmin<0, columnName = "FirstTminFreeze") %>% left_join(cherry, ., by=c("year", "location")) 
+
+
+### Months
+cherry <- firstDay(tmax>4, columnName = "FirstJanTmaxAbove4", month=1) %>% left_join(cherry, ., by=c("year", "location")) 
+cherry <- firstDay(tmax>5, columnName = "FirstFebTmaxAbove5", month=2) %>% left_join(cherry, ., by=c("year", "location")) 
+
+cherry <- firstDay(tmin>(-1), columnName = "FirstJanTminAboveNeg1", month=1) %>% left_join(cherry, ., by=c("year", "location")) 
+cherry <- firstDay(tmin>(-2), columnName = "FirstFebTminAboveNeg2", month=2) %>% left_join(cherry, ., by=c("year", "location")) 
+
+
+#Max consec Thresholds
+cherry <- consecDays(tmin<0, columnName = "MaxConsecTminSub0") %>% left_join(cherry, ., by=c("year", "location")) 
+cherry <- consecDays(tmax<0, columnName = "MaxConsecTmaxSub0") %>% left_join(cherry, ., by=c("year", "location")) 
+
+cherry <- consecDays(tmin<0, columnName = "MaxOctConsecTminSub0", month=10) %>% left_join(cherry, ., by=c("year", "location")) 
+cherry <- consecDays(tmin<0, columnName = "MaxNovConsecTminSub0", month=11) %>% left_join(cherry, ., by=c("year", "location")) 
+cherry <- consecDays(tmin<0, columnName = "MaxDecConsecTminSub0", month=12) %>% left_join(cherry, ., by=c("year", "location")) 
+
+cherry <- consecDays(tmin>0, columnName = "MaxJanConsecTminAbove0", month=1) %>% left_join(cherry, ., by=c("year", "location")) 
+cherry <- consecDays(tmin>0, columnName = "MaxFebConsecTminAbove0", month=2) %>% left_join(cherry, ., by=c("year", "location")) 
+
+cherry <- consecDays(tmax>10, columnName = "MaxJanConsecTmaxAbove10", month=1) %>% left_join(cherry, ., by=c("year", "location")) 
+cherry <- consecDays(tmax>10, columnName = "MaxFebConsecTmaxAbove10", month=2) %>% left_join(cherry, ., by=c("year", "location")) 
+
+
+cherry <- dplyr::filter(cherry, year>1953)
+```
+
+Getting Rid of Problematic Years.
+```{r}
+cherry <- dplyr::filter(cherry, location!="liestal" | year!=2017) #Missing previous Dec
+cherry <- dplyr::filter(cherry, location!="liestal" | year!=1954) #Missing previous Dec
+cherry <- dplyr::filter(cherry, location!="washingtondc" | year!=1997) #Missing previous Dec
+cherry <- dplyr::filter(cherry, location!="washingtondc" | year!=2002) #Missing Year Entirely
+cherry <- dplyr::filter(cherry, location!="washingtondc" | year!=2003) #Missing /Prior Year
+cherry <- dplyr::filter(cherry, location!="kyoto" | year!=2007) #Missing previous Dec
+cherry <- dplyr::filter(cherry, location!="kyoto" | year!=2005) #Missing all but Dec
+cherry <- dplyr::filter(cherry, location!="liestal" | year!=2015) #Missing a lot of 2015
+cherry <- dplyr::filter(cherry, location!="liestal" | year!=2016) #Missing a lot of 2016
+cherry <- dplyr::filter(cherry, location!="washingtondc" | year!=1989) #Missing February Temperature Data
+cherry <- dplyr::filter(cherry, location!="kyoto" | year!=2006) #Missing Temperature Data For September-October
+cherry <- dplyr::filter(cherry, location!="washingtondc" | year!=2006) #Missing Temperature Data For September-October
+cherry <- dplyr::filter(cherry, location!="washingtondc" | year!=1996) #Missing Temperature Data For September-October
+cherry <- dplyr::filter(cherry, location!="washingtondc" | year!=1990) #Missing All Data For November
+```
+
+```{r}
+table(is.na(cherry))
+table(is.na(cherry[,36])) #I don't know why this doesn't work.There are two Nas in the problem month, but I thought the function should be able to handle NAs just fine. idk.
+colnames(cherry)[36]
+
+#write.csv(cherry, file = "InitCovariates.csv", row.names = FALSE)
+
+#dat <- read.csv(file="ExCovariates.csv")
 ```
 
