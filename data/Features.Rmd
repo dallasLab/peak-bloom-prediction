@@ -12,7 +12,9 @@ knitr::opts_chunk$set(echo = TRUE)
 
 ```{r}
 #install.packages(tidyverse)
+#install.packages(zoo)
 library(tidyverse)
+library(zoo)
 ```
 
 ```{r}
@@ -243,9 +245,17 @@ cherry <- consecDays(tmax>10, columnName = "MaxFebConsecTmaxAbove10", month=2) %
 
 cherry <- dplyr::filter(cherry, year>1953)
 ```
-
-Getting Rid of Problematic Years.
+Interpolate Missing Values
 ```{r}
+for(i in 8:ncol(cherry)){
+  for(j in 1:length(unique(cherry$location)))
+  cherry[which(cherry$location==unique(cherry$location)[j]),i] <- zoo::na.approx(cherry[which(cherry$location==unique(cherry$location)[j]),i], rule=2)
+}
+```
+
+
+Getting Rid of Problematic Years; eval set to false since we interpolate
+```{r eval=FALSE}
 cherry <- dplyr::filter(cherry, location!="liestal" | year!=2017) #Missing previous Dec
 cherry <- dplyr::filter(cherry, location!="liestal" | year!=1954) #Missing previous Dec
 cherry <- dplyr::filter(cherry, location!="washingtondc" | year!=1997) #Missing previous Dec
@@ -262,6 +272,17 @@ cherry <- dplyr::filter(cherry, location!="washingtondc" | year!=1996) #Missing 
 cherry <- dplyr::filter(cherry, location!="washingtondc" | year!=1990) #Missing All Data For November
 ```
 
+We still shouldn't use these years due to our lack or data
+
+```{r}
+cherry <- dplyr::filter(cherry, location!="washingtondc" | year!=2002) #Missing Year Entirely
+cherry <- dplyr::filter(cherry, location!="washingtondc" | year!=2003) #Missing /Prior Year
+#cherry <- dplyr::filter(cherry, location!="liestal" | year!=2016) #Missing all of 2015 but December
+#cherry <- dplyr::filter(cherry, location!="liestal" | year!=2015) #Missing Spring Data
+#cherry <- dplyr::filter(cherry, location!="kyoto" | year!=2005) #Missing Spring Data
+```
+
+Can no longer see this weird point after interpolation, but I still don't know why it returns an NA. 
 ```{r}
 table(is.na(cherry))
 table(is.na(cherry[,36])) #I don't know why this doesn't work.There are two Nas in the problem month, but I thought the function should be able to handle NAs just fine. idk.
