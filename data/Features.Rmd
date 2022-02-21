@@ -11,6 +11,7 @@ knitr::opts_chunk$set(echo = TRUE)
 
 
 ```{r}
+#install.packages(tidyverse)
 library(tidyverse)
 ```
 
@@ -21,23 +22,34 @@ cherry <- read.csv("../data/washingtondc.csv") %>%
 
 cherry <- dplyr::filter(cherry, year >1950)
 
+cherry$bloom_doy <- cherry$bloom_doy + 188 #Set Bloom day to be as same scale as climate data
+
 cherry2 <- cherry
 ```
 
+September 1st C_day is 244. 
+
+Read in historic climate data.
 
 ```{r}
 historic_covs <- read.table(file="../data/covariates/historic_climate.txt")
 historic_covs <- dplyr::filter(historic_covs, year >= 1950)
 ```
-
-
+Assign a "cherry year" to match winter weather with spring blooms. 
 ```{r}
 historic_covs <- dplyr::filter(historic_covs, month <5 | month >8)
 historic_covs$cherry_year <- 0
 
 historic_covs$cherry_year[historic_covs$month >8] <- historic_covs$year[historic_covs$month >8]+1
-
 historic_covs$cherry_year[historic_covs$month <8] <- historic_covs$year[historic_covs$month <8]
+```
+
+C_day as read in is unique integer identifier, where 1=Jan first. Below I reset to where September 1st is equal to 1, so that the climate dates relevant for a given bloom year are 1-243. 
+
+```{r}
+historic_covs$C_day <- historic_covs$C_day-243 #Set Sept1-Dec31 as 1-122
+
+historic_covs$C_day[historic_covs$C_day<0] <- historic_covs$C_day[historic_covs$C_day<0] - min(historic_covs$C_day) + max(historic_covs$C_day)  
 ```
 
 1) Function for the Number of Days in the Time Series (or Month) that meets a given criteria
@@ -250,14 +262,12 @@ cherry <- dplyr::filter(cherry, location!="washingtondc" | year!=1996) #Missing 
 cherry <- dplyr::filter(cherry, location!="washingtondc" | year!=1990) #Missing All Data For November
 ```
 
-36: I don't know why this doesn't work. I can't see
-Get rid of missing data
 ```{r}
 table(is.na(cherry))
-table(is.na(cherry[,36])) #I don't know why this doesn't work.
+table(is.na(cherry[,36])) #I don't know why this doesn't work.There are two Nas in the problem month, but I thought the function should be able to handle NAs just fine. idk.
 colnames(cherry)[36]
 
-write.csv(cherry, file = "InitCovariates.csv", row.names = FALSE)
+#write.csv(cherry, file = "InitCovariates.csv", row.names = FALSE)
 
 #dat <- read.csv(file="ExCovariates.csv")
 ```
