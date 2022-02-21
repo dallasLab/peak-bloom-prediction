@@ -45,9 +45,11 @@ The six columns in each data file are
 In R, the data files can be read with `read.csv()` and concatenated with the `bind_rows()` function:
 
 ```{r}
-cherry <- read.csv("data/washingtondc.csv") %>% 
-  bind_rows(read.csv("data/liestal.csv")) %>% 
-  bind_rows(read.csv("data/kyoto.csv"))
+# cherry <- read.csv("data/washingtondc.csv") %>% 
+#   bind_rows(read.csv("data/liestal.csv")) %>% 
+#   bind_rows(read.csv("data/kyoto.csv"))
+
+cherry <- read.csv("data/ExCovariates.csv")
 ```
 
 
@@ -79,7 +81,7 @@ stations <- ghcnd_stations()
 
 As a simple demonstration, we retrieve the average seasonal maximum daily temperature (in 1/10 °C) from these stations using our own `get_temperature()` function, which wraps the `ghcnd_search()` function in the `rnoaa` package. (N.b. `ghcnd_search()` returns a list. Each element of the list corresponds to an element of the `var` argument.)
 
-```{r}
+```{r, eval =F}
 #' Get the annual average maximum temperature at the given station,
 #' separated into the 4 meteorological seasons (Winter, Spring, Summer, Fall).
 #' 
@@ -118,9 +120,8 @@ historic_temperatures <-
 
 We then predict the peak bloom date in two steps. Step 1 extrapolates average winter and spring temperature until 2031 using simple linear regression. Step 2 predicts the peak bloom date given the extrapolated temperatures, again using simple linear regression. 
 
-```{r}
-library(gbm)
-library(dismo)
+```{r, eval =F, old weather data processing}
+
 
 vancouver_cov <- filter(historic_temperatures, location == "vancouver") %>%
   drop_na()%>%
@@ -129,21 +130,28 @@ vancouver_cov <- filter(historic_temperatures, location == "vancouver") %>%
 cherry_temp <- left_join(cherry, historic_temperatures, by = c("location", "year")) %>%
   drop_na() %>%
   dplyr::select( year, lat, long, temp_Winter, temp_Spring,temp_Summer, temp_Fall, bloom_doy)
+```
 
+```{r}
+library(gbm)
+library(dismo)
+
+cherry_temp <- cherry %>%
+  dplyr::select(-c("bloom_date"))
 trControl <- trainControl(method = "cv", number = 10)
 
 tuneGrid <- expand.grid(interaction.depth = c(1,3,5),n.trees = (5:10)*100, shrinkage = c(.1,.01), n.minobsinnode =10)
 
-fullMod <- train(x = cherry_temp[,1:7],
+
+fullMod <- train(x = dplyr::select(cherry_temp,-c("bloom_doy", "location")),
       y = cherry_temp$bloom_doy,
       distribution = "gaussian",
       method="gbm",
       metric = "RMSE",
       tuneGrid = tuneGrid,
       trControl = trControl)
-plot(predict(mod, newData= vancouver_cov))
 
-summary(mod)
+summary(fullMod)
 
 ```
 
@@ -154,17 +162,17 @@ cherry_test <- cherry_temp %>%
 cherry_train <- cherry_temp %>%
   filter(year <2020)
 
-fullmod <- train(x = cherry_train[,1:7],
+fullMod <- train(x = cherry_train[,1:7],
       y = cherry_train$bloom_doy,
       distribution = "gaussian",
-      method="gbm",
+      method="rf",
       metric = "RMSE",
-      tuneGrid = tuneGrid,
+      #tuneGrid = tuneGrid,
       trControl = trControl)
 
-summary(mod)
+summary(fullMod)
 
-predictions <- predict(fullmod, cherry_test)
+predictions <- predict(fullMod, cherry_test)
 RMSE_Full <- sqrt(mean((cherry_test$bloom_doy - predictions)^2))
   
 
@@ -172,7 +180,7 @@ RMSE <- c()
 for(i in 1:ncol(cherry_test)-1){
   vars <- 1:ncol(cherry_test)-1
   vars <- vars[-i]
-  mod <- train(x = cherry_train[,vars],
+  mod <- train(x = dplyr::select(cherry_train,-bloom_doy)[,vars],
       y = cherry_train$bloom_doy,
       distribution = "gaussian",
       method="gbm",
@@ -183,6 +191,58 @@ for(i in 1:ncol(cherry_test)-1){
   RMSE[i] <- sqrt(mean((cherry_test$bloom_doy - predictions)^2))
   
 }
+
+
+```
+
+
+```{r Ensemble}
+library(caretEnsemble)
+
+cherry_test <- cherry_temp %>%
+  filter(year >= 2010)
+
+cherry_train <- cherry_temp %>%
+  filter(year <2010)
+
+mod_list <- caretList(
+  x = dplyr::select(cherry_train,-c("bloom_doy", "location")),
+  y = cherry_train$bloom_doy,
+  trControl = trControl,
+  methodList = c("gbm", "glm", "rf")
+)
+
+
+mod_stack <- caretStack(
+  mod_list
+)
+
+mod_ensemble <- caretEnsemble(
+  mod_list
+)
+
+compPreds <- predict(mod_list, newdata = dplyr::select(cherry_test,-c("bloom_doy", "location")))
+ensPreds <- predict(mod_ensemble, newdata = dplyr::select(cherry_test,-c("bloom_doy", "location")))
+
+stackPreds <- predict(mod_stack, newdata = dplyr::select(cherry_test,-c("bloom_doy", "location")))
+
+
+plot(cherry_test$bloom_doy, ensPreds, col = "black", ylim = c(80,100), pch=16)
+points(cherry_test$bloom_doy, compPreds[,"glm"], col = "red", pch =16)
+points(cherry_test$bloom_doy, compPreds[,"rf"], col = "blue", pch = 16)
+points(cherry_test$bloom_doy, compPreds[,"gbm"], col = "green", pch = 16)
+abline(a = 0, b = 1)
+legend("topleft", legend = c("Ensemble", "GLM", "RF", "GBM"), col = c("black", "red", "blue", "green"), pch =16)
+
+
+rmseEns <- sqrt(mean((ensPreds-cherry_test$bloom_doy)^2))
+
+rmseGLM <- sqrt(mean((compPreds[,"glm"]-cherry_test$bloom_doy)^2))
+
+rmseRF<- sqrt(mean((compPreds[,"rf"]-cherry_test$bloom_doy)^2))
+
+rmseGBM<- sqrt(mean((compPreds[,"gbm"]-cherry_test$bloom_doy)^2))
+
 
 
 ```
