@@ -16,6 +16,7 @@ source("FeatureFunctions.R")
 
 ```{r}
 future_covs <- read.table(file="../data/covariates/future_climate.txt")
+
 ```
 Assign a "cherry year" to match winter weather with spring blooms. 
 ```{r}
