@@ -72,8 +72,7 @@ library(gbm)
 library(dismo)
 
 cherry_temp <- cherry %>%
-  dplyr::select(-c("bloom_date")) %>%
-  drop_na()
+  dplyr::select(-c("bloom_date"))
 
 cherry_test <- cherry_temp %>%
   filter(year >= 2010)
@@ -123,8 +122,6 @@ mod_ensemble <- caretEnsemble(
 
 compPreds <- predict(mod_list, newdata = dplyr::select(cherry_test,-c("bloom_doy", "location")))
 ensPreds <- predict(mod_ensemble, newdata = dplyr::select(cherry_test,-c("bloom_doy", "location")))
-
-stackPreds <- predict(mod_stack, newdata = dplyr::select(cherry_test,-c("bloom_doy", "location")))
 
 
 plot(cherry_test$bloom_doy, ensPreds, col = "black", ylim = c(80,100), pch=16)
