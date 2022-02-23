@@ -256,47 +256,17 @@ for(i in 8:ncol(cherry)){
 table(is.na(cherry))
 ```
 
-
-Getting Rid of Problematic Years; eval set to false since we interpolate
-```{r eval=FALSE}
-cherry <- dplyr::filter(cherry, location!="liestal" | year!=2016) #Missing previous Dec
-cherry <- dplyr::filter(cherry, location!="liestal" | year!=1954) #Missing previous Dec
-cherry <- dplyr::filter(cherry, location!="washingtondc" | year!=1997) #Missing previous Dec
-cherry <- dplyr::filter(cherry, location!="washingtondc" | year!=2002) #Missing Year Entirely
-cherry <- dplyr::filter(cherry, location!="washingtondc" | year!=2003) #Missing /Prior Year
-cherry <- dplyr::filter(cherry, location!="kyoto" | year!=2007) #Missing previous Dec
-cherry <- dplyr::filter(cherry, location!="kyoto" | year!=2005) #Missing all but Dec
-cherry <- dplyr::filter(cherry, location!="liestal" | year!=2015) #Missing a lot of 2015
-cherry <- dplyr::filter(cherry, location!="liestal" | year!=2016) #Missing a lot of 2016
-cherry <- dplyr::filter(cherry, location!="washingtondc" | year!=1989) #Missing February Temperature Data
-cherry <- dplyr::filter(cherry, location!="kyoto" | year!=2006) #Missing Temperature Data For September-October
-cherry <- dplyr::filter(cherry, location!="washingtondc" | year!=2006) #Missing Temperature Data For September-October
-cherry <- dplyr::filter(cherry, location!="washingtondc" | year!=1996) #Missing Temperature Data For September-October
-cherry <- dplyr::filter(cherry, location!="washingtondc" | year!=1990) #Missing All Data For November
-```
-
-We still shouldn't use these years due to our lack or data
+We still shouldn't use these years due to our lack of data
 
 ```{r}
 cherry <- dplyr::filter(cherry, location!="kocation" | year!=2005) #Entire year; will interpolate the winter
 cherry <- dplyr::filter(cherry, location!="liestal" | year!=2015) #Missing Entire Year
 cherry <- dplyr::filter(cherry, location!="liestal" | year!=2016) #Missing Spring
 cherry <- dplyr::filter(cherry, location!="washingtondc" | year!=2002) #Missing Year Entirely
-
-#cherry <- dplyr::filter(cherry, location!="liestal" | year!=2016) #Missing all of 2015 but December
-#cherry <- dplyr::filter(cherry, location!="liestal" | year!=2015) #Missing Spring Data
-#cherry <- dplyr::filter(cherry, location!="kyoto" | year!=2005) #Missing Spring Data
 ```
   
 
-
-Can no longer see this weird point after interpolation, but I still don't know why it returns an NA. 
 ```{r}
-table(is.na(cherry))
-table(is.na(cherry[,11:17])) #I don't know why this doesn't work.There are two Nas in the problem month, but I thought the function should be able to handle NAs just fine. idk.
-table(is.na(cherry[,17]))
-colnames(cherry)[17]
-
 #write.csv(cherry, file = "InitCovariates.csv", row.names = FALSE)
 
 #dat <- read.csv(file="ExCovariates.csv")
