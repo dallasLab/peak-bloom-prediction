@@ -51,14 +51,18 @@ NEED TO ADD
 ```{r}
 historic_covs <- read.table(file="../data/covariates/historic_climate.txt")
 
-future_covs <- dplyr::filter(historic_covs, year>=2021 & month >8) %>% mutate(., C_day=C_day-243, cherry_year=year+1) %>% rbind(., future_covs)
+future_covs <- dplyr::filter(historic_covs, year>=2021 & month >8) %>% mutate(., C_day=C_day-243, cherry_year=year+1) %>% rbind(., future_covs) #Add in 2021 Winter
 
-x <- dplyr::filter(historic_covs, year==2022)
+#As of right now, we only have spring dates from liestal and kyoto; I remove the predictions to take the actual data from historic
+future_covs <- dplyr::filter(future_covs, cherry_year!=2022 | location!="kyoto" | month != 1)
+future_covs <- dplyr::filter(future_covs, cherry_year!=2022 | location!="kyoto" | month != 2 | day >15)
 
-future_covs <- dplyr::filter(future_covs, cherry_year!=2022 | location!="kyoto" | month > 2)
+future_covs <- dplyr::filter(future_covs, cherry_year!=2022 | location!="vancouver" | month != 1)
+future_covs <- dplyr::filter(future_covs, cherry_year!=2022 | location!="vancouver" | month != 2 | day >15)
 
-z <- dplyr::filter(future_covs, cherry_year!=2022 | location!="liestal" | month > 1 | day >15)
+future_covs <- dplyr::filter(historic_covs, year==2022) %>% mutate(., C_day=C_day+122, cherry_year=year) %>% rbind(., future_covs) #Add in 2022 Spring observations for Vancouver and Kyoto up to Feb 15th 
 
+table(dplyr::filter(x, year==2022)$location)
 ```
 
 
@@ -152,10 +156,4 @@ table(is.na(cherryPreds))
 write.csv(cherryPreds, file = "PredictionCovariates.csv", row.names = FALSE)
 ```
 
-
-
-```{r}
-x <- dplyr::filter(historic_covs, year==2021 & location=="vancouver")
-y <- dplyr::filter(historic_covs, year==2022 & location=="vancouver")
-```
 
