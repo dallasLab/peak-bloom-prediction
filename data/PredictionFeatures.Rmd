@@ -36,6 +36,11 @@ future_covs$C_day[future_covs$C_day<0] <- future_covs$C_day[future_covs$C_day<0]
 
 Joining in 2021 winter data so we can predict 2022. 
 
+```{r}
+x <- dplyr::filter(future_covs, year==2032)
+table(x$location)
+```
+
 
 NEED TO ADD Vancouver
 Something fishy Here
@@ -46,7 +51,14 @@ NEED TO ADD
 ```{r}
 historic_covs <- read.table(file="../data/covariates/historic_climate.txt")
 
-future_covs <- dplyr::filter(historic_covs, year==2021 & month >8) %>% mutate(., C_day=C_day-243, cherry_year=year+1) %>% rbind(., future_covs)
+future_covs <- dplyr::filter(historic_covs, year>=2021 & month >8) %>% mutate(., C_day=C_day-243, cherry_year=year+1) %>% rbind(., future_covs)
+
+x <- dplyr::filter(historic_covs, year==2022)
+
+future_covs <- dplyr::filter(future_covs, cherry_year!=2022 | location!="kyoto" | month > 2)
+
+z <- dplyr::filter(future_covs, cherry_year!=2022 | location!="liestal" | month > 1 | day >15)
+
 ```
 
 
@@ -140,4 +152,10 @@ table(is.na(cherryPreds))
 write.csv(cherryPreds, file = "PredictionCovariates.csv", row.names = FALSE)
 ```
 
+
+
+```{r}
+x <- dplyr::filter(historic_covs, year==2021 & location=="vancouver")
+y <- dplyr::filter(historic_covs, year==2022 & location=="vancouver")
+```
 
