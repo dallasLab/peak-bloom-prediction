@@ -72,13 +72,13 @@ historic_covs$C_day[historic_covs$C_day<0] <- historic_covs$C_day[historic_covs$
 
 countDays <- function(condition, columnName, month_input=NA){
   if(is.na(month_input)==TRUE){
-output <- historic_covs %>% group_by(., cherry_year, location) %>% summarise(., temp=length(which({{condition}}))) #
+output <- historic_covs %>% group_by(., cherry_year, location) %>% dplyr::summarise(., temp=length(which({{condition}}))) #
 colnames(output) <- c("year", "location", columnName)
 return(output)
   }
   else{
     set <- dplyr::filter(historic_covs, month==month_input)
-    output <- set %>% group_by(., cherry_year, location) %>% summarise(., temp=length(which({{condition}}))) #
+    output <- set %>% group_by(., cherry_year, location) %>% dplyr::summarise(., temp=length(which({{condition}}))) #
     colnames(output) <- c("year", "location", columnName)
     return(output)
   }
@@ -88,7 +88,7 @@ return(output)
 cherry <- countDays(tmax<0, columnName="DaysSub0") %>% left_join(cherry, ., by=c("year", "location")) 
 
 #Example 2: Count the number of total days below 0 in December
-cherry <- countDays(tmax<0, columnName="DecDaysSub0", month=12) %>% left_join(cherry, ., by=c("year", "location")) 
+table(is.na(countDays(tmax>0, columnName="DecDaysAbove0", month=12)$DecDaysAbove0))
 
 ```
 
@@ -247,16 +247,19 @@ cherry <- dplyr::filter(cherry, year>1953)
 ```
 Interpolate Missing Values
 ```{r}
+table(is.na(cherry))
 for(i in 8:ncol(cherry)){
   for(j in 1:length(unique(cherry$location)))
   cherry[which(cherry$location==unique(cherry$location)[j]),i] <- zoo::na.approx(cherry[which(cherry$location==unique(cherry$location)[j]),i], rule=2)
 }
+
+table(is.na(cherry))
 ```
 
 
 Getting Rid of Problematic Years; eval set to false since we interpolate
 ```{r eval=FALSE}
-cherry <- dplyr::filter(cherry, location!="liestal" | year!=2017) #Missing previous Dec
+cherry <- dplyr::filter(cherry, location!="liestal" | year!=2016) #Missing previous Dec
 cherry <- dplyr::filter(cherry, location!="liestal" | year!=1954) #Missing previous Dec
 cherry <- dplyr::filter(cherry, location!="washingtondc" | year!=1997) #Missing previous Dec
 cherry <- dplyr::filter(cherry, location!="washingtondc" | year!=2002) #Missing Year Entirely
@@ -275,18 +278,28 @@ cherry <- dplyr::filter(cherry, location!="washingtondc" | year!=1990) #Missing 
 We still shouldn't use these years due to our lack or data
 
 ```{r}
+cherry <- dplyr::filter(cherry, location!="kocation" | year!=2005) #Entire year; will interpolate the winter
+cherry <- dplyr::filter(cherry, location!="liestal" | year!=2015) #Missing Entire Year
+cherry <- dplyr::filter(cherry, location!="liestal" | year!=2016) #Missing Spring
 cherry <- dplyr::filter(cherry, location!="washingtondc" | year!=2002) #Missing Year Entirely
-cherry <- dplyr::filter(cherry, location!="washingtondc" | year!=2003) #Missing /Prior Year
+
 #cherry <- dplyr::filter(cherry, location!="liestal" | year!=2016) #Missing all of 2015 but December
 #cherry <- dplyr::filter(cherry, location!="liestal" | year!=2015) #Missing Spring Data
 #cherry <- dplyr::filter(cherry, location!="kyoto" | year!=2005) #Missing Spring Data
 ```
 
+What are we missing?
+```{r}
+
+```
+
+
 Can no longer see this weird point after interpolation, but I still don't know why it returns an NA. 
 ```{r}
 table(is.na(cherry))
-table(is.na(cherry[,36])) #I don't know why this doesn't work.There are two Nas in the problem month, but I thought the function should be able to handle NAs just fine. idk.
-colnames(cherry)[36]
+table(is.na(cherry[,11:17])) #I don't know why this doesn't work.There are two Nas in the problem month, but I thought the function should be able to handle NAs just fine. idk.
+table(is.na(cherry[,17]))
+colnames(cherry)[17]
 
 #write.csv(cherry, file = "InitCovariates.csv", row.names = FALSE)
 
