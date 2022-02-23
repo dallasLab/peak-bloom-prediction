@@ -49,7 +49,8 @@ In R, the data files can be read with `read.csv()` and concatenated with the `bi
 #   bind_rows(read.csv("data/liestal.csv")) %>% 
 #   bind_rows(read.csv("data/kyoto.csv"))
 
-cherry <- read.csv("data/InitCovariates.csv")
+cherry <- read.csv("data/InitCovariates.csv") %>%
+  dplyr::select(-c("TmaxDaysSub0", "TmaxDaysSub5", "TmaxDaysSub10", "TmaxDaysSub20", "TmaxDaysSub25", "TminDaysSub0", "TminDaysSub5", "TminDaysSub10"))
 ```
 
 
@@ -94,7 +95,7 @@ fullMod <- train(x = dplyr::select(cherry_train,-c("bloom_doy", "location")),
       trControl = trControl,
       verbose =F)
 
-vars <- summary(fullMod$finalModel)$var[1:20]
+vars <- summary(fullMod$finalModel)$var
 
 ```
 
@@ -112,9 +113,10 @@ mod_list <- caretList(
 )
 
 
-# mod_stack <- caretStack(
-#   mod_list
-# )
+mod_stack <- caretStack(
+  mod_list,
+  method = "enet"
+)
 
 mod_ensemble <- caretEnsemble(
   mod_list
@@ -122,7 +124,7 @@ mod_ensemble <- caretEnsemble(
 
 compPreds <- predict(mod_list, newdata = dplyr::select(cherry_test,-c("bloom_doy", "location")))
 ensPreds <- predict(mod_ensemble, newdata = dplyr::select(cherry_test,-c("bloom_doy", "location")))
-
+stackPreds <- predict(mod_stack, newdata = dplyr::select(cherry_test,-c("bloom_doy", "location")))
 
 plot(cherry_test$bloom_doy, ensPreds, col = "black", ylim = c(80,100), pch=16)
 points(cherry_test$bloom_doy, compPreds[,"glm"], col = "red", pch =16)
@@ -133,6 +135,8 @@ legend("topleft", legend = c("Ensemble", "GLM", "RF", "GBM"), col = c("black", "
 
 
 rmseEns <- sqrt(mean((ensPreds-cherry_test$bloom_doy)^2))
+
+rmseStack <- sqrt(mean((stackPreds-cherry_test$bloom_doy)^2))
 
 rmseGLM <- sqrt(mean((compPreds[,"glm"]-cherry_test$bloom_doy)^2))
 
@@ -148,9 +152,9 @@ rmseSVM<- sqrt(mean((compPreds[,"svmLinear"]-cherry_test$bloom_doy)^2))
 
 rmseENET<- sqrt(mean((compPreds[,"enet"]-cherry_test$bloom_doy)^2))
 
-fullEnsPerf <- c(rmseEns, rmseGLM, rmseRF, rmseGBM, rmseFOBA, rmseXGB, rmseSVM, rmseENET)
+fullEnsPerf <- c(rmseEns, rmseStack, rmseGLM, rmseRF, rmseGBM, rmseFOBA, rmseXGB, rmseSVM, rmseENET)
 
-names(fullEnsPerf) <- c("Ens", "GLM", "RF", "GBM", "FOBA", "XGB", "SVM", "ENET")
+names(fullEnsPerf) <- c("Ens", "Stack","GLM", "RF", "GBM", "FOBA", "XGB", "SVM", "ENET")
 ```
 
 
@@ -158,62 +162,125 @@ names(fullEnsPerf) <- c("Ens", "GLM", "RF", "GBM", "FOBA", "XGB", "SVM", "ENET")
 
 ```{r Variable Reduced Ensemble}
 library(caretEnsemble)
+
+subEnsPerf <- matrix(NA, nrow = 16, ncol = 9)
+
+varIndex <- seq(5,35, by = 2)
+for(i in 1:length(varIndex)){
 cherry_test_sub <- cherry_test %>%
-  dplyr::select(c(vars, "bloom_doy", "location"))
+  dplyr::select(c(vars[1:varIndex[i]], "bloom_doy", "location"))
 
 cherry_train_sub <- cherry_train %>%
-  dplyr::select(c(vars, "bloom_doy", "location"))
+  dplyr::select(c(vars[1:varIndex[i]], "bloom_doy", "location"))
 
 
 mod_list <- caretList(
-  x = dplyr::select(cherry_train,-c("bloom_doy", "location")),
-  y = cherry_train$bloom_doy,
+  x = dplyr::select(cherry_train_sub,-c("bloom_doy", "location")),
+  y = cherry_train_sub$bloom_doy,
   trControl = trControl,
   methodList = c("gbm", "glm", "rf", "foba", "xgbTree", "svmLinear", "enet")
 )
 
 
-# mod_stack <- caretStack(
-#   mod_list
-# )
+mod_stack <- caretStack(
+  mod_list,
+  method = "enet"
+)
 
 mod_ensemble <- caretEnsemble(
   mod_list
 )
 
-compPreds <- predict(mod_list, newdata = dplyr::select(cherry_test,-c("bloom_doy", "location")))
-ensPreds <- predict(mod_ensemble, newdata = dplyr::select(cherry_test,-c("bloom_doy", "location")))
-
-#stackPreds <- predict(mod_stack, newdata = dplyr::select(cherry_test,-c("bloom_doy", "location")))
-
-
-plot(cherry_test$bloom_doy, ensPreds, col = "black", ylim = c(80,100), pch=16)
-points(cherry_test$bloom_doy, compPreds[,"glm"], col = "red", pch =16)
-points(cherry_test$bloom_doy, compPreds[,"rf"], col = "blue", pch = 16)
-points(cherry_test$bloom_doy, compPreds[,"gbm"], col = "green", pch = 16)
-abline(a = 0, b = 1)
-legend("topleft", legend = c("Ensemble", "GLM", "RF", "GBM"), col = c("black", "red", "blue", "green"), pch =16)
+compPreds <- predict(mod_list, newdata = dplyr::select(cherry_test_sub,-c("bloom_doy", "location")))
+ensPreds <- predict(mod_ensemble, newdata = dplyr::select(cherry_test_sub,-c("bloom_doy", "location")))
+stackPreds <- predict(mod_stack, newdata = dplyr::select(cherry_test_sub,-c("bloom_doy", "location")))
 
 
-rmseEns <- sqrt(mean((ensPreds-cherry_test$bloom_doy)^2))
+rmseEns <- sqrt(mean((ensPreds-cherry_test_sub$bloom_doy)^2))
 
-rmseGLM <- sqrt(mean((compPreds[,"glm"]-cherry_test$bloom_doy)^2))
+rmseStack <- sqrt(mean((stackPreds-cherry_test_sub$bloom_doy)^2))
 
-rmseRF<- sqrt(mean((compPreds[,"rf"]-cherry_test$bloom_doy)^2))
+rmseGLM <- sqrt(mean((compPreds[,"glm"]-cherry_test_sub$bloom_doy)^2))
 
-rmseGBM<- sqrt(mean((compPreds[,"gbm"]-cherry_test$bloom_doy)^2))
+rmseRF<- sqrt(mean((compPreds[,"rf"]-cherry_test_sub$bloom_doy)^2))
 
-rmseFOBA<- sqrt(mean((compPreds[,"foba"]-cherry_test$bloom_doy)^2))
+rmseGBM<- sqrt(mean((compPreds[,"gbm"]-cherry_test_sub$bloom_doy)^2))
 
-rmseXGB<- sqrt(mean((compPreds[,"xgbTree"]-cherry_test$bloom_doy)^2))
+rmseFOBA<- sqrt(mean((compPreds[,"foba"]-cherry_test_sub$bloom_doy)^2))
 
-rmseSVM<- sqrt(mean((compPreds[,"svmLinear"]-cherry_test$bloom_doy)^2))
+rmseXGB<- sqrt(mean((compPreds[,"xgbTree"]-cherry_test_sub$bloom_doy)^2))
 
-rmseENET<- sqrt(mean((compPreds[,"enet"]-cherry_test$bloom_doy)^2))
+rmseSVM<- sqrt(mean((compPreds[,"svmLinear"]-cherry_test_sub$bloom_doy)^2))
+
+rmseENET<- sqrt(mean((compPreds[,"enet"]-cherry_test_sub$bloom_doy)^2))
 
 
-subEnsPerf <- c(rmseEns, rmseGLM, rmseRF, rmseGBM, rmseFOBA, rmseXGB, rmseSVM, rmseENET)
+subEnsPerf[i,] <- c(rmseEns, rmseStack, rmseGLM, rmseRF, rmseGBM, rmseFOBA, rmseXGB, rmseSVM, rmseENET)
 
-names(subEnsPerf) <- c("Ens", "GLM", "RF", "GBM", "FOBA", "XGB", "SVM", "ENET")
+}
+colnames(subEnsPerf) <- c("Ens", "Stack","GLM", "RF", "GBM", "FOBA", "XGB", "SVM", "ENET")
+
+```
+
+
+```{r evaluate on next year for 10 years}
+
+evalYears <- 2010:2021
+evalYears <- evalYears[-6] # Get rid of 2015 because it's missing in switzerland
+
+ensOneYearPerf <- matrix(NA, nrow = length(evalYears), ncol = 9)
+
+for(i in 1:length(evalYears)){
+  
+  cherry_test_plus <- filter(cherry_test, year ==evalYears[i])
+  cherry_train_plus <- bind_rows(cherry_train,
+                                 filter(cherry_test, year < evalYears[i]))
+  
+  
+  mod_list <- caretList(
+    x = dplyr::select(cherry_train_plus,-c("bloom_doy", "location")),
+    y = cherry_train_plus$bloom_doy,
+    trControl = trControl,
+    methodList = c("gbm", "glm", "rf", "foba", "xgbTree", "svmLinear", "enet"),
+    verbose = F
+  )
+  
+  
+  mod_stack <- caretStack(
+    mod_list,
+    method = "enet"
+  )
+  
+  mod_ensemble <- caretEnsemble(
+    mod_list
+  )
+  
+  compPreds <- predict(mod_list, newdata = dplyr::select(cherry_test_plus,-c("bloom_doy", "location")))
+  ensPreds <- predict(mod_ensemble, newdata = dplyr::select(cherry_test_plus,-c("bloom_doy", "location")))
+  stackPreds <- predict(mod_stack, newdata = dplyr::select(cherry_test_plus,-c("bloom_doy", "location")))
+  
+  
+  rmseEns <- sqrt(mean((ensPreds-cherry_test_plus$bloom_doy)^2))
+  
+  rmseStack <- sqrt(mean((stackPreds-cherry_test_plus$bloom_doy)^2))
+  
+  rmseGLM <- sqrt(mean((compPreds[,"glm"]-cherry_test_plus$bloom_doy)^2))
+  
+  rmseRF<- sqrt(mean((compPreds[,"rf"]-cherry_test_plus$bloom_doy)^2))
+  
+  rmseGBM<- sqrt(mean((compPreds[,"gbm"]-cherry_test_plus$bloom_doy)^2))
+  
+  rmseFOBA<- sqrt(mean((compPreds[,"foba"]-cherry_test_plus$bloom_doy)^2))
+  
+  rmseXGB<- sqrt(mean((compPreds[,"xgbTree"]-cherry_test_plus$bloom_doy)^2))
+  
+  rmseSVM<- sqrt(mean((compPreds[,"svmLinear"]-cherry_test_plus$bloom_doy)^2))
+  
+  rmseENET<- sqrt(mean((compPreds[,"enet"]-cherry_test_plus$bloom_doy)^2))
+  
+  ensOneYearPerf[i,] <- c(rmseEns, rmseStack, rmseGLM, rmseRF, rmseGBM, rmseFOBA, rmseXGB, rmseSVM, rmseENET)
+  
+}
+
 
 ```
