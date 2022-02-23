@@ -402,4 +402,11 @@ toc()
 
 colnames(permuteOneYearPerf) <- vars
 
+# Difference in performance between permuted and unpermuted variable models
+perfDifference <- permuteOneYearPerf-ensOneYearPerf
+
+# Mean of these across years as a proxy for influence
+meanInfluence <- colMeans(perfDifference)
+
+
 ```
