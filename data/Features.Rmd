@@ -287,11 +287,7 @@ cherry <- dplyr::filter(cherry, location!="washingtondc" | year!=2002) #Missing 
 #cherry <- dplyr::filter(cherry, location!="liestal" | year!=2015) #Missing Spring Data
 #cherry <- dplyr::filter(cherry, location!="kyoto" | year!=2005) #Missing Spring Data
 ```
-
-What are we missing?
-```{r}
-
-```
+  
 
 
 Can no longer see this weird point after interpolation, but I still don't know why it returns an NA. 

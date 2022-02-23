@@ -141,3 +141,9 @@ write.csv(cherryPreds, file = "PredictionCovariates.csv", row.names = FALSE)
 ```
 
 
+
+```{r}
+x <- dplyr::filter(historic_covs, year==2021 & location=="vancouver")
+y <- dplyr::filter(historic_covs, year==2022 & location=="vancouver")
+```
+
