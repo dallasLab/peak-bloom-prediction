@@ -327,7 +327,7 @@ colnames(ensOneYearPerf) <- c("Ens", "Stack","StackReg", "RF", "GBM", "RIDGE", "
 
 ```
 
-```{r Variable importance}
+```{r Variable importance based on 1 year at a time}
 
 # This code measures variable importance through a modified permutation approach based on the full stacked model
 # It should be easy to adapt if we choose a different model
@@ -341,16 +341,12 @@ evalYears <- evalYears[-6] # Get rid of 2015 because it's missing in switzerland
 # Get all the variable names except for location and bloom_doy
 varNames <- names(cherry_train)[-c(1,6)]
 # Initialize matrix to store performance
-ensOneYearPerf <- matrix(NA, nrow = length(evalYears), ncol = length(varNames))
+permuteOneYearPerf <- matrix(NA, nrow = length(evalYears), ncol = length(varNames))
 
 set.seed(8675309)
-
-cl <- makeCluster(10)
-
-registerDoParallel(cl)
 tic()
 # Loop over years using a foreach statement
-permuteOneYearPerf <- foreach(i = 1:length(evalYears), .combine = "rbind", .packages = c("dplyr", "tidyr", "caret", "caretEnsemble")) %dopar%{
+for(i in  1:length(evalYears)){
   varPerf <- c()
   for(j in 1:length(varNames)){
     # Repeat the permutation on each variable 10 times because the sample size is small.
@@ -374,6 +370,7 @@ permuteOneYearPerf <- foreach(i = 1:length(evalYears), .combine = "rbind", .pack
       mod_list,
       method = "enet"
     )
+    tic()
     rmseStack <- c()
     for(k in 1:10){
     # Subset testing data to test year
@@ -390,15 +387,14 @@ permuteOneYearPerf <- foreach(i = 1:length(evalYears), .combine = "rbind", .pack
     # Should probably write a function for this
     rmseStack[k] <- sqrt(mean((stackPreds-cherry_test_plus$bloom_doy)^2))
     }
+    toc()
     # Store the mean performance across the 10 permutations of that variable
     varPerf[j] <- mean(rmseStack)
   }
   # Worker node returns this vector and then binds it as a row to the others
-  return(varPerf)
+  permuteOneYearPerf[i,j] <- varPerf
 }
 
-stopCluster(cl)
-toc()
 
 colnames(permuteOneYearPerf) <- vars
 
@@ -407,6 +403,62 @@ perfDifference <- permuteOneYearPerf-ensOneYearPerf
 
 # Mean of these across years as a proxy for influence
 meanInfluence <- colMeans(perfDifference)
+toc()
 
+```
+
+
+```{r Variable importance based on all testing years}
+
+# This code measures variable importance through a modified permutation approach based on the full stacked model
+# It should be easy to adapt if we choose a different model
+# I say "modified" because the nature of our evaluation (the NEXT year) makes permutation a sort of wonky thing to do. It doesn't seem reasonable to just mess up the given variable for that year and those 3 locations and call it a day. Because of climate change etc.
+# Instead we are going to pick a random other value for the variable from the training data for that variable
+
+set.seed(8675309)
+tic()
+# Loop over years using a foreach statement
+varPerf <- c()
+for(j in 1:length(varNames)){
+  # Repeat the permutation on each variable 10 times because the sample size is small.
+  
+  # Fit full model list we can do this outside the below loop because that loop only affects testing data
+  mod_list <- caretList(
+    x = dplyr::select(cherry_train,-c("bloom_doy", "location")),
+    y = cherry_train$bloom_doy,
+    trControl = trControl,
+    tuneList = model_types
+  )
+  
+  # Produce the stack/ensemble models
+  
+  
+  mod_stack<- caretStack(
+    mod_list,
+    method = "enet"
+  )
+  # Replace values of chosen variable in the testing data with random values of that variable from training data
+  # This should remove the relationship (on average) without causing too many theor
+  cherry_test[,varNames[j]] <- sample(c(cherry_test[,varNames[j]]), size = nrow(cherry_test))
+  
+  
+  # Get predictions of all models for the testing year
+  stackPreds <- predict(mod_stack, newdata = dplyr::select(cherry_test,-c("bloom_doy", "location")))
+  
+  # Calculate RMSE for each model type
+  # Should probably write a function for this
+  rmseStack <- sqrt(mean((stackPreds-cherry_test$bloom_doy)^2))
+  # Store the mean performance across the 10 permutations of that variable
+  varPerf[j] <- mean(rmseStack)
+}
+toc()
+
+
+# Difference in performance between permuted and unpermuted variable models
+perfDifference <- permuteOneYearPerf-ensOneYearPerf
+
+# Mean of these across years as a proxy for influence
+meanInfluence <- colMeans(perfDifference)
+toc()
 
 ```
