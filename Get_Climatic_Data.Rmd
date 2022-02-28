@@ -59,8 +59,8 @@ historic_climate$tmin<-historic_climate$tmin/10
 historic_climate$prcp<-historic_climate$prcp/10
 
 ##Saving the txt file that'll be used in the analyses
-setwd('peak-bloom-prediction/data')
-write.table(x = historic_climate, 'historic_climate.txt')
+#setwd('peak-bloom-prediction/data')
+write.table(x = historic_climate, 'data/covariates/historic_climate.txt')
 ```
 
 
@@ -266,8 +266,6 @@ Futclim$prcp<-Futclim$prcp*86400 ##transform to km2/m/s to mm
 rownames(Futclim)<-NULL
 
 
-setwd('peak-bloom-prediction/data')
-write.table(x = Futclim, 'future_climate.txt')##precipitation might be in different measures
-
+write.table(x = Futclim, 'data/covariates/future_climate.txt')##precipitation might be in different measures
 ```
 
