@@ -10,7 +10,7 @@ predictions <- read.csv("cherry_predictions.csv") %>%
   dplyr::mutate(type = "Predicted") 
 
 kyoto <- read.csv("data/kyoto.csv") %>% 
-  dplyr::select(year, location, bloom_doy) %>% 
+  dplyr::select(year, location, bloom_doy) #%>% 
   dplyr::filter(year > 1890) # Reduce dataset to comparable years for visualization
 
 liestal <- read.csv("data/liestal.csv") %>% 
@@ -25,12 +25,12 @@ observations <- rbind(kyoto, liestal, washingtondc) %>%
 # Combine observed and predicted data frames
 all_doys <- rbind(observations, predictions) 
 
-# Create labels for plot
-locations_labs <- c("Kyoto", "Liestal", "Vancouver", "Washington DC")
+# Modify labels for plot
+locations_labs <- c("Kyoto", "Liestal-Weideli", "Vancouver", "Washington DC")
 names(locations_labs) <- c("kyoto", "liestal", "vancouver", "washingtondc")
 
 # Plot the time series of past and predicted data for each location
-pdf("Time_series_plot.pdf")
+pdf("figures/time_seriesPlot.pdf")
 ggplot(data = all_doys, aes(x = year, y = bloom_doy, color = type))+
   geom_line(size = 1)+
   facet_wrap(~location, labeller = labeller(location = locations_labs))+
