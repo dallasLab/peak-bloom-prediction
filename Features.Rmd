@@ -12,7 +12,7 @@ knitr::opts_chunk$set(echo = TRUE)
 ```{r}
 install.packages("tidyverse")
 install.packages("zoo")
-install.packages(rnoaa)
+install.packages("rnoaa")
 
 library(tidyverse)
 library(zoo)
