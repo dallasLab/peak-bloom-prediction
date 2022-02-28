@@ -107,6 +107,7 @@ tuneGridGBM <- expand.grid(interaction.depth = c(1,3,5),n.trees = (5:10)*100, sh
 
 
 # Set up the models and settings for the full list of models
+# See caret documenation for additional details on these models (https://topepo.github.io/caret/train-models-by-tag.html)
 model_types <- list(gbm = caretModelSpec(method = "gbm", verbose =F, tuneGrid = tuneGridGBM),
                     rf = caretModelSpec(method = "rf"),
                     lasso= caretModelSpec(method = "lasso"),
