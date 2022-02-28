@@ -1,0 +1,296 @@
+---
+title: "Peak Bloom Prediction Demo"
+author: "Eager Learner"
+date: "01/01/2022"
+output:
+  html_document:
+    df_print: kable
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, error = FALSE, 
+                      message = FALSE,
+                      fig.align = 'center',
+                      out.width = '80%')
+```
+
+
+```{r}
+# Load packages
+library(tidyverse)
+library(caret)
+library(caretEnsemble)
+library(doParallel)
+library(wesanderson)
+
+```
+
+
+## Loading the data
+
+The data for each of the three main sites is provided as simple text file in CSV format.
+Each file contains the dates of the peak bloom of the cherry trees at the respective site, alongside the geographical location of the site.
+
+The six columns in each data file are
+
+* _location_ a human-readable location identifier (`string`).
+* _lat_ (approximate) latitude of the cherry trees (`double`).
+* _long_ (approximate) longitude of the cherry trees (`double`).
+* _alt_ (approximate) altitude of the cherry trees (`double`).
+* _year_ year of the observation (`integer`).
+* *bloom_date* date of peak bloom of the cherry trees (ISO 8601 date `string`). The "peak bloom date" may be defined differently for different sites
+* *bloom_doy* days since January 1st of the year until peak bloom (`integer`). January 1st corresponds to `1`.
+* We convert the _location_ variable to a set of dummy variables for each location (We set Vancouver's location equivalent to DC because they share a species and peak threshold)
+
+```{r}
+
+cherry <- read.csv("data/InitCovariates.csv") %>%
+  dplyr::select(-c("TmaxDaysSub0", "TmaxDaysSub5", "TmaxDaysSub10", "TmaxDaysSub20", "TmaxDaysSub25", "TminDaysSub0", "TminDaysSub5", "TminDaysSub10")) %>%
+  # Create dummy variables for location
+  mutate(DC = case_when(location == "washingtondc" ~ 1,
+                        TRUE ~ 0),
+         SW = case_when(location == "liestal" ~ 1,
+                        TRUE ~ 0),
+         JP = case_when(location == "kyoto" ~ 1,
+                        TRUE ~0))
+
+future_cherry <- read.csv("data/PredictionCovariates.csv") %>% 
+  dplyr::select(-c("TmaxDaysSub0", "TmaxDaysSub5", "TmaxDaysSub10", "TmaxDaysSub20", "TmaxDaysSub25", "TminDaysSub0", "TminDaysSub5", "TminDaysSub10")) %>%
+  # Create dummy variables for location
+  mutate(DC = case_when(location == "washingtondc" ~ 1,
+                        location == "vancouver" ~ 1,
+                        TRUE ~ 0),
+         SW = case_when(location == "liestal" ~ 1,
+                        TRUE ~ 0),
+         JP = case_when(location == "kyoto" ~ 1,
+                        TRUE ~0),
+         # Set latitudes as they are absent in this dataset
+         lat = case_when(location == "washingtondc" ~ filter(cherry, location=="washingtondc")$lat[1],
+                        location == "vancouver" ~ 49.2237,
+                        location == "liestal" ~ filter(cherry, location=="liestal")$lat[1],
+                        location == "kyoto" ~ filter(cherry, location=="kyoto")$lat[1]),
+         long = case_when(location == "washingtondc" ~ filter(cherry, location=="washingtondc")$long[1],
+                        location == "vancouver" ~ -123.1636,
+                        location == "liestal" ~ filter(cherry, location=="liestal")$long[1],
+                        location == "kyoto" ~ filter(cherry, location=="kyoto")$long[1]),
+         alt = case_when(location == "washingtondc" ~ filter(cherry, location=="washingtondc")$alt[1],
+                        location == "vancouver" ~ as.integer(24),
+                        location == "liestal" ~ filter(cherry, location=="liestal")$alt[1],
+                        location == "kyoto" ~ filter(cherry, location=="kyoto")$alt[1])) %>%
+  relocate(c("lat", "long", "alt"), .before = year)
+
+
+# remove irrelevant variable
+cherry_temp <- cherry %>%
+  dplyr::select(-c("bloom_date"))
+
+# Separate into time based test and train data
+cherry_test <- cherry_temp %>%
+  filter(year >= 2010)
+
+cherry_train <- cherry_temp %>%
+  filter(year <2010)
+
+```
+
+# Set model parameters
+```{r}
+
+
+# Set training parameters to 10-fold cross validation for hyperparameter tuning
+trControl <- trainControl(method = "cv", number = 10)
+
+# Establish custom tuning grids for models 
+# Any models without custom tuning grids rely on default caret tuning grids
+tuneGridGBM <- expand.grid(interaction.depth = c(1,3,5),n.trees = (5:10)*100, shrinkage = c(.1,.01), n.minobsinnode =10)
+
+
+```
+
+# Fit Models
+
+```{r Ensemble}
+## Fit a single set of models to the training data and evaluate on the testing data
+
+
+# Set up the models and settings for the full list of models
+model_types <- list(gbm = caretModelSpec(method = "gbm", verbose =F, tuneGrid = tuneGridGBM),
+                    rf = caretModelSpec(method = "rf"),
+                    lasso= caretModelSpec(method = "lasso"),
+                    ridge = caretModelSpec(method = "foba"),
+                    xgBoost = caretModelSpec(method = "xgbTree", verbose =0),
+                    svm = caretModelSpec(method = "svmLinear"),
+                    enet = caretModelSpec(method = "enet"))
+
+
+# Fit list of models
+
+# Note that XGBtree will throw a bunch (A BUNCH) of warnings about deprecation of the ntree_limit argument
+# This is the thing caret is tuning with and it does still seem to work as intended
+# If we provide our own tuning grid we should use iteration_range....but for now I couldn't figure out how to suppress all the warnings.
+# Apparently xgboost is notorious for warning suppression issues
+
+set.seed(8675309)
+mod_list <- caretList(
+  x = dplyr::select(cherry_train,-c("bloom_doy", "location")),
+  y = cherry_train$bloom_doy,
+  trControl = trControl,
+  tuneList = model_types
+)
+
+
+# Create stack of models combining predictions of component models based on an elastic net
+mod_stack <- caretStack(
+  mod_list,
+  method = "enet"
+)
+
+# Create simple ensemble of models
+mod_ensemble <- caretEnsemble(
+  mod_list
+)
+
+# Produce predictions based on component and ensemble models for testing data
+compPreds <- predict(mod_list, newdata = dplyr::select(cherry_test,-c("bloom_doy", "location")))
+ensPreds <- predict(mod_ensemble, newdata = dplyr::select(cherry_test,-c("bloom_doy", "location")))
+stackPreds <- predict(mod_stack, newdata = dplyr::select(cherry_test,-c("bloom_doy", "location")))
+
+
+# Calculate RMSE for each model
+rmseEns <- sqrt(mean((ensPreds-cherry_test$bloom_doy)^2))
+rmseStack <- sqrt(mean((stackPreds-cherry_test$bloom_doy)^2))
+rmseRF<- sqrt(mean((compPreds[,"rf"]-cherry_test$bloom_doy)^2))
+rmseGBM<- sqrt(mean((compPreds[,"gbm"]-cherry_test$bloom_doy)^2))
+rmseRidge<- sqrt(mean((compPreds[,"ridge"]-cherry_test$bloom_doy)^2))
+rmseLasso<- sqrt(mean((compPreds[,"lasso"]-cherry_test$bloom_doy)^2))
+rmseXGB<- sqrt(mean((compPreds[,"xgBoost"]-cherry_test$bloom_doy)^2))
+rmseSVM<- sqrt(mean((compPreds[,"svm"]-cherry_test$bloom_doy)^2))
+rmseENET<- sqrt(mean((compPreds[,"enet"]-cherry_test$bloom_doy)^2))
+fullEnsPerf <- c(rmseEns, rmseStack, rmseRF, rmseGBM, rmseRidge, rmseLasso, rmseXGB, rmseSVM, rmseENET)
+
+names(fullEnsPerf) <- c("Ens", "Stack", "RF", "GBM", "Ridge", "Lasso", "XGB", "SVM", "ENET")
+```
+
+
+
+
+
+```{r Variable importance based on all testing years}
+
+# This code measures variable importance through a modified permutation approach based on the full stacked model
+
+
+
+varPerf <- c()
+
+# Set up the list of variables for permutation
+varNames <- names(cherry_train)[-c(1,6)]
+
+set.seed(8675309)
+# Loop through all variables (ending with the three location dummy variables)
+for(j in 1:(length(varNames)-2)){
+ cherry_test_plus <- cherry_test
+
+  # Replace values of chosen variable in the testing data with random values of that variable from training data
+  # This should remove the relationship (on average) without causing too many theor
+  cherry_test_plus[,varNames[j]] <- sample(c(cherry_test[,varNames[j]]), size = nrow(cherry_test))
+  
+  # If we're at the end of the list of variables (where the location dummies are) permute all of them together
+  if(j == (length(varNames)-2)){
+    cherry_test_plus[,varNames[j+1]] <- sample(c(cherry_test[,varNames[j+1]]), size = nrow(cherry_test))
+    cherry_test_plus[,varNames[j+2]] <- sample(c(cherry_test[,varNames[j+2]]), size = nrow(cherry_test))
+  }
+  
+  # Get predictions of all models for the testing year
+  stackPreds <- predict(mod_stack, newdata = dplyr::select(cherry_test_plus,-c("bloom_doy", "location")))
+  
+  # Calculate RMSE for each model type
+  # Should probably write a function for this
+  rmseStack <- sqrt(mean((stackPreds-cherry_test_plus$bloom_doy)^2))
+  # Store the mean performance across the 10 permutations of that variable
+  varPerf[j] <- mean(rmseStack)
+}
+
+
+# Difference in performance between permuted and unpermuted variable models
+perfDifference <- varPerf-fullEnsPerf["Stack"]
+
+
+# Create a dataframe for all the variable influences
+inflDf <- bind_cols(vars = c(varNames[1:35], "Location"), Infl = perfDifference)
+
+
+# Alter the names of variables to be more readable adn produce relative influence barplot
+
+pal <- wes_palette("Darjeeling1", 4, type = "discrete")
+
+impPlot <- inflDf %>%
+  arrange(desc(Infl)) %>%
+  mutate(vars = case_when(vars == "lat" ~ "Latitude",
+                          vars == "long" ~ "Longitude",
+                          vars == "alt" ~ "Altitude",
+                          vars == "year" ~ "Year",
+                          TRUE ~ vars),
+         vars = str_replace(vars, "Above", " > "),
+         vars = str_replace(vars, "Neg", " -"),
+         vars = str_replace(vars, "Sub", " < "),
+         vars = gsub("([a-z])([A-Z])", "\\1 \\2", vars),
+         vartype = case_when(str_detect(vars, "Prcp") ~ "Precipitation",
+                             (str_detect(vars,"Tmax") | str_detect(vars,"Tmin")) & !(str_detect(vars, "Jan") | str_detect(vars, "Feb") | str_detect(vars, "Oct") |str_detect(vars, "Nov") |str_detect(vars, "Dec")) ~ "Annual Temperature",
+                             (str_detect(vars,"Tmax") | str_detect(vars,"Tmin")) & (str_detect(vars, "Jan") | str_detect(vars, "Feb") | str_detect(vars, "Oct") |str_detect(vars, "Nov") |str_detect(vars, "Dec")) ~ "Monthly Temperature",
+                             TRUE ~ "Other"),
+         vartype = factor(vartype, levels = c("Annual Temperature", "Monthly Temperature", "Precipitation", "Other"))) %>%
+  ggplot(aes(y = reorder(vars, Infl), x = Infl, fill = vartype)) +
+  geom_col()+
+  theme_minimal()+
+  xlab("Delta RMSE") +
+  ylab("Covariate") +
+  scale_fill_manual( name= "Variable Type", values = pal)
+  
+
+
+ggsave("figures/variableImportancePlot.png", plot = impPlot)
+
+```
+
+```{r final predictions}
+
+# Set variables that erode model performance
+badVars <- dplyr::filter(inflDf, Infl<0)$vars
+set.seed(8675309)
+
+# Fit full model
+mod_list <- caretList(
+  x = dplyr::select(cherry_temp,-c("bloom_doy", "location", all_of(badVars))),
+  y = cherry$bloom_doy,
+  trControl = trControl,
+  tuneList = model_types
+)
+
+
+# Create stack of models combining predictions of component models based on an elastic net
+mod_stack <- caretStack(
+  mod_list,
+  method = "enet"
+)
+
+stackPreds <- predict(mod_stack, newdata = dplyr::select(future_cherry,-c("location", all_of(badVars))))
+
+
+
+# Reformat predictions to match submission including converting DOY back to standard format
+predictions_noBadVars <- bind_cols(location = future_cherry$location, year = future_cherry$year, bloom_doy = stackPreds-122) %>%
+  mutate(bloom_doy = round(bloom_doy)) %>%
+  pivot_wider(names_from = location, values_from = bloom_doy)
+
+write.csv(predictions_noBadVars, "cherry_predictions.csv")
+
+
+
+
+
+
+```
+
+
+
