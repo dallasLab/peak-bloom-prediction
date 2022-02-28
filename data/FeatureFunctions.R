@@ -75,3 +75,7 @@ consecDays <- function(condition, data, columnName, month_input=NA){
   }
   return(output)
 }
+
+
+#Note that you can include multiple operations in the "condition" argument of each function
+#consecDays(condition = tmax > 0 & tmax <5, columnName = "Above0Sub5consec")

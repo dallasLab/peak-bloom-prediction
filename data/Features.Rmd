@@ -9,12 +9,14 @@ output: html_document
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
-
 ```{r}
 #install.packages(tidyverse)
 #install.packages(zoo)
 library(tidyverse)
 library(zoo)
+library(rnoaa)
+
+source("FeatureFunctions.R")
 ```
 
 ```{r}
@@ -25,8 +27,6 @@ cherry <- read.csv("../data/washingtondc.csv") %>%
 cherry <- dplyr::filter(cherry, year >1950)
 
 cherry$bloom_doy <- cherry$bloom_doy + 122 #Set Bloom day to be as same scale as climate data
-
-cherry2 <- cherry
 ```
 
 September 1st C_day is 244. 
@@ -54,193 +54,74 @@ historic_covs$C_day <- historic_covs$C_day-243 #Set Sept1-Dec31 as 1-122
 historic_covs$C_day[historic_covs$C_day<0] <- historic_covs$C_day[historic_covs$C_day<0] - min(historic_covs$C_day) + max(historic_covs$C_day)  
 ```
 
-1) Function for the Number of Days in the Time Series (or Month) that meets a given criteria
+Create covariates. 
 ```{r}
-#' For each year-site combination, counts the number of days in historic_covs that meet a certain condition. 
-#' Relies on historic coves to be loaded in environment
-#' Default is to search across the entire time series, but optional @month_input param allows you to only search within a given month instead. 
-
-#' @param condition. Counts the number of days that meet this condition (ex. tmax <0)
-#' @param columnName. The name of the column of counts
-#' @param month_input. Allows you to search over a particular month, encoded as an integer 1-12. Leaving this blank will search over the entire year
-
-#' @output A three column dataframe containing the following
-#' "year": The year that the covariate is relevant to (i.e. Temperatures in the winter of 1951 will be labeled as 1952, since that's the bloom they effect)
-#' "location"
-#' "columnName": Your output value; if left joined to "cherry" above, this will be the only added column
-
-
-countDays <- function(condition, columnName, month_input=NA){
-  if(is.na(month_input)==TRUE){
-output <- historic_covs %>% group_by(., cherry_year, location) %>% dplyr::summarise(., temp=length(which({{condition}}))) #
-colnames(output) <- c("year", "location", columnName)
-return(output)
-  }
-  else{
-    set <- dplyr::filter(historic_covs, month==month_input)
-    output <- set %>% group_by(., cherry_year, location) %>% dplyr::summarise(., temp=length(which({{condition}}))) #
-    colnames(output) <- c("year", "location", columnName)
-    return(output)
-  }
-}
-
-#Example: Count the number of total days below 0
-cherry <- countDays(tmax<0, columnName="DaysSub0") %>% left_join(cherry, ., by=c("year", "location")) 
-
-#Example 2: Count the number of total days below 0 in December
-table(is.na(countDays(tmax>0, columnName="DecDaysAbove0", month=12)$DecDaysAbove0))
-
-```
-
-2) Function for the First Day of the Time Series (or Month) that meets a given criteria
-
-Note:This is returned in C_Day, the unique day identifier.
-```{r}
-#' For each year-site combination, returns the first day in historic_covs that meet a certain condition. 
-#' Returned value is in terms of C_day, which is the unique day identifier for each year
-#' If no day in the designated time series meets the criteria, returns NA
-#' Relies on historic coves to be loaded in environment
-#' Default is to search across the entire time series, but optional @month_input param allows you to only search within a given month instead. 
-
-#' params and outputs follow same convention as @countDays
-
-firstDay <- function(condition, columnName, month_input=NA){
-  if(is.na(month_input)==TRUE){
-output <- historic_covs %>% group_by(., cherry_year, location) %>% summarise(., temp=C_day[min(which({{condition}}), na.rm = TRUE)]) #
- output$temp[is.infinite(output$temp)==TRUE] <- NA
-colnames(output) <- c("year", "location", columnName)
-  }
-  else{
-    set <- dplyr::filter(historic_covs, month==month_input)
-    output <- set %>% group_by(., cherry_year, location) %>% summarise(., temp=C_day[min(which({{condition}}), na.rm=TRUE)]) #
-    output$temp[is.infinite(output$temp)==TRUE] <- NA
-    colnames(output) <- c("year", "location", columnName)
-  }
-  return(output)
-}
-
-firstDay(condition=tmax<0, columnName="FirstSub0")
-firstDay(condition=tmax<0, columnName="FirstDecSub0", 12)
-
-
-
-#Example: Record the First Day of each Growing Season (September-April) that falls below 0
-cherry <- firstDay(tmax<0, columnName="FirstSub0") %>% left_join(cherry, ., by=c("year", "location")) 
-
-#Example 2: Count the number of total days below 0 in December
-cherry <- firstDay(tmax<0, columnName="FirstDecSub0", month=12) %>% left_join(cherry, ., by=c("year", "location")) 
-```
-
-3) Function for the Number of consecutive days under or over a certain threshold.
-
-(Note: This function throws warnings from the max function each time you have a year-site combination that doesn't meet the criteria, which can be a lot)
-```{r}
-#' For each year-site combination, returns the number of consecutive days in historic_covs that meet a certain condition. 
-#' Relies on historic coves to be loaded in environment
-#' Default is to search across the entire time series, but optional @month_input param allows you to only search within a given month instead. 
-
-#' params and outputs follow same convention as @countDays
-
-consecDays <- function(condition, columnName, month_input=NA){
-  if(is.na(month_input)==TRUE){
-  output <- historic_covs %>% group_by(., cherry_year, location) %>% 
-    summarise(., temp=max(rle({{condition}})$length[rle({{condition}})$values==TRUE], na.rm=TRUE)) #
-    output$temp[is.infinite(output$temp)==TRUE] <- 0
-    output$temp[is.na(output$temp)==TRUE] <- 0 #I think this is correct; let me make sure!
-colnames(output) <- c("year", "location", columnName)
-  }
-  else{
-    set <- dplyr::filter(historic_covs, month==month_input)
-    output <- set %>% group_by(., cherry_year, location) %>% 
-    summarise(., temp=max(rle({{condition}})$length[rle({{condition}})$values==TRUE], na.rm=TRUE)) #
-    output$temp[is.infinite(output$temp)==TRUE] <- 0
-colnames(output) <- c("year", "location", columnName)
-  }
-  return(output)
-}
-
-
-cherry <- consecDays(tmax<0, columnName = "SeqSub0") %>% left_join(cherry, ., by=c("year", "location")) 
-
-#Ex 1. Find longest consecutive number of days in January T_max is below 0
-cherry <- consecDays(tmax<0, columnName = "JanSeqSub0", month_input = 1) %>% left_join(cherry, ., by=c("year", "location")) 
-```
-
-Note that you can include multiple operations in the "condition" argument of each function
-```{r}
-consecDays(condition = tmax>0 & tmax <5, columnName = "Above0Sub5consec")
-```
-
-Create covariates. Creates a total of 39 as of now. 
-```{r}
-
-cherry <- cherry2
 #Cumulative Thresholds
 
 ## Above
 ### Total Time Series
 
-cherry <- countDays(tmax>0, columnName = "TmaxDaysAbove0") %>% left_join(cherry, ., by=c("year", "location")) 
-cherry <- countDays(tmax>5, columnName = "TmaxDaysAbove5") %>% left_join(cherry, ., by=c("year", "location")) 
-cherry <- countDays(tmax>10, columnName = "TmaxDaysAbove10") %>% left_join(cherry, ., by=c("year", "location")) 
-cherry <- countDays(tmax>20, columnName = "TmaxDaysAbove20") %>% left_join(cherry, ., by=c("year", "location")) 
-cherry <- countDays(tmax>25, columnName = "TmaxDaysAbove25") %>% left_join(cherry, ., by=c("year", "location")) 
+cherry <- countDays(tmax>0, data=historic_covs, columnName = "TmaxDaysAbove0") %>% left_join(cherry, ., by=c("year", "location")) 
+cherry <- countDays(tmax>5, data=historic_covs, columnName = "TmaxDaysAbove5") %>% left_join(cherry, ., by=c("year", "location")) 
+cherry <- countDays(tmax>10, data=historic_covs, columnName = "TmaxDaysAbove10") %>% left_join(cherry, ., by=c("year", "location")) 
+cherry <- countDays(tmax>20, data=historic_covs, columnName = "TmaxDaysAbove20") %>% left_join(cherry, ., by=c("year", "location")) 
+cherry <- countDays(tmax>25, data=historic_covs, columnName = "TmaxDaysAbove25") %>% left_join(cherry, ., by=c("year", "location")) 
 
-cherry <- countDays(tmin>0, columnName = "TminDaysAbove0") %>% left_join(cherry, ., by=c("year", "location")) 
-cherry <- countDays(tmin>5, columnName = "TminDaysAbove5") %>% left_join(cherry, ., by=c("year", "location")) 
-cherry <- countDays(tmin>10, columnName = "TminDaysAbove10") %>% left_join(cherry, ., by=c("year", "location")) 
+cherry <- countDays(tmin>0, data=historic_covs, columnName = "TminDaysAbove0") %>% left_join(cherry, ., by=c("year", "location")) 
+cherry <- countDays(tmin>5, data=historic_covs, columnName = "TminDaysAbove5") %>% left_join(cherry, ., by=c("year", "location")) 
+cherry <- countDays(tmin>10, data=historic_covs, columnName = "TminDaysAbove10") %>% left_join(cherry, ., by=c("year", "location")) 
 
-cherry <- countDays(prcp>0, columnName = "PrcpDays") %>% left_join(cherry, ., by=c("year", "location")) 
+cherry <- countDays(prcp>0, data=historic_covs, columnName = "PrcpDays") %>% left_join(cherry, ., by=c("year", "location")) 
 
 ### Months
-cherry <- countDays(tmax>0, columnName = "TmaxDecAbove0", month=12) %>% left_join(cherry, ., by=c("year", "location")) 
-cherry <- countDays(tmax>0, columnName = "TmaxJanAbove0", month=1) %>% left_join(cherry, ., by=c("year", "location")) 
-cherry <- countDays(tmax>0, columnName = "TmaxFebAbove0", month=12) %>% left_join(cherry, ., by=c("year", "location")) 
+cherry <- countDays(tmax>0, data=historic_covs, columnName = "TmaxDecAbove0", month=12) %>% left_join(cherry, ., by=c("year", "location")) 
+cherry <- countDays(tmax>0, data=historic_covs, columnName = "TmaxJanAbove0", month=1) %>% left_join(cherry, ., by=c("year", "location")) 
+cherry <- countDays(tmax>0, data=historic_covs, columnName = "TmaxFebAbove0", month=12) %>% left_join(cherry, ., by=c("year", "location")) 
 
-cherry <- countDays(prcp>0, columnName = "DecPrcpDays", month=12) %>% left_join(cherry, ., by=c("year", "location")) 
-cherry <- countDays(prcp>0, columnName = "JanPrcpDays", month=1) %>% left_join(cherry, ., by=c("year", "location")) 
-cherry <- countDays(prcp>0, columnName = "FebPrcpDays", month=2) %>% left_join(cherry, ., by=c("year", "location")) 
+cherry <- countDays(prcp>0, data=historic_covs, columnName = "DecPrcpDays", month=12) %>% left_join(cherry, ., by=c("year", "location")) 
+cherry <- countDays(prcp>0, data=historic_covs, columnName = "JanPrcpDays", month=1) %>% left_join(cherry, ., by=c("year", "location")) 
+cherry <- countDays(prcp>0, data=historic_covs, columnName = "FebPrcpDays", month=2) %>% left_join(cherry, ., by=c("year", "location")) 
 
 
 ## Below
-cherry <- countDays(tmax<0, columnName = "TmaxDaysSub0") %>% left_join(cherry, ., by=c("year", "location")) 
-cherry <- countDays(tmax<5, columnName = "TmaxDaysSub5") %>% left_join(cherry, ., by=c("year", "location")) 
-cherry <- countDays(tmax<10, columnName = "TmaxDaysSub10") %>% left_join(cherry, ., by=c("year", "location")) 
-cherry <- countDays(tmax<20, columnName = "TmaxDaysSub20") %>% left_join(cherry, ., by=c("year", "location")) 
-cherry <- countDays(tmax<25, columnName = "TmaxDaysSub25") %>% left_join(cherry, ., by=c("year", "location")) 
+cherry <- countDays(tmax<0, data=historic_covs, columnName = "TmaxDaysSub0") %>% left_join(cherry, ., by=c("year", "location")) 
+cherry <- countDays(tmax<5, data=historic_covs, columnName = "TmaxDaysSub5") %>% left_join(cherry, ., by=c("year", "location")) 
+cherry <- countDays(tmax<10, data=historic_covs, columnName = "TmaxDaysSub10") %>% left_join(cherry, ., by=c("year", "location")) 
+cherry <- countDays(tmax<20, data=historic_covs, columnName = "TmaxDaysSub20") %>% left_join(cherry, ., by=c("year", "location")) 
+cherry <- countDays(tmax<25, data=historic_covs, columnName = "TmaxDaysSub25") %>% left_join(cherry, ., by=c("year", "location")) 
 
-cherry <- countDays(tmin<0, columnName = "TminDaysSub0") %>% left_join(cherry, ., by=c("year", "location")) 
-cherry <- countDays(tmin<5, columnName = "TminDaysSub5") %>% left_join(cherry, ., by=c("year", "location")) 
-cherry <- countDays(tmin<8, columnName = "TminDaysSub8") %>% left_join(cherry, ., by=c("year", "location")) 
-cherry <- countDays(tmin<10, columnName = "TminDaysSub10") %>% left_join(cherry, ., by=c("year", "location")) 
+cherry <- countDays(tmin<0, data=historic_covs, columnName = "TminDaysSub0") %>% left_join(cherry, ., by=c("year", "location")) 
+cherry <- countDays(tmin<5, data=historic_covs, columnName = "TminDaysSub5") %>% left_join(cherry, ., by=c("year", "location")) 
+cherry <- countDays(tmin<8, data=historic_covs, columnName = "TminDaysSub8") %>% left_join(cherry, ., by=c("year", "location")) 
+cherry <- countDays(tmin<10, data=historic_covs, columnName = "TminDaysSub10") %>% left_join(cherry, ., by=c("year", "location")) 
 
 #First Day Thresholds
 #Full Time Series
-cherry <- firstDay(tmax<7, columnName = "FirstTmaxSub7") %>% left_join(cherry, ., by=c("year", "location")) 
-cherry <- firstDay(tmin<0, columnName = "FirstTminFreeze") %>% left_join(cherry, ., by=c("year", "location")) 
+cherry <- firstDay(tmax<7, data=historic_covs, columnName = "FirstTmaxSub7") %>% left_join(cherry, ., by=c("year", "location")) 
+cherry <- firstDay(tmin<0, data=historic_covs, columnName = "FirstTminFreeze") %>% left_join(cherry, ., by=c("year", "location")) 
 
 
 ### Months
-cherry <- firstDay(tmax>4, columnName = "FirstJanTmaxAbove4", month=1) %>% left_join(cherry, ., by=c("year", "location")) 
-cherry <- firstDay(tmax>5, columnName = "FirstFebTmaxAbove5", month=2) %>% left_join(cherry, ., by=c("year", "location")) 
+cherry <- firstDay(tmax>4, data=historic_covs, columnName = "FirstJanTmaxAbove4", month=1) %>% left_join(cherry, ., by=c("year", "location")) 
+cherry <- firstDay(tmax>5, data=historic_covs, columnName = "FirstFebTmaxAbove5", month=2) %>% left_join(cherry, ., by=c("year", "location")) 
 
-cherry <- firstDay(tmin>(-1), columnName = "FirstJanTminAboveNeg1", month=1) %>% left_join(cherry, ., by=c("year", "location")) 
-cherry <- firstDay(tmin>(-2), columnName = "FirstFebTminAboveNeg2", month=2) %>% left_join(cherry, ., by=c("year", "location")) 
+cherry <- firstDay(tmin>(-1), data=historic_covs, columnName = "FirstJanTminAboveNeg1", month=1) %>% left_join(cherry, ., by=c("year", "location")) 
+cherry <- firstDay(tmin>(-2), data=historic_covs, columnName = "FirstFebTminAboveNeg2", month=2) %>% left_join(cherry, ., by=c("year", "location")) 
 
 
 #Max consec Thresholds
-cherry <- consecDays(tmin<0, columnName = "MaxConsecTminSub0") %>% left_join(cherry, ., by=c("year", "location")) 
-cherry <- consecDays(tmax<0, columnName = "MaxConsecTmaxSub0") %>% left_join(cherry, ., by=c("year", "location")) 
+cherry <- consecDays(tmin<0, data=historic_covs, columnName = "MaxConsecTminSub0") %>% left_join(cherry, ., by=c("year", "location")) 
+cherry <- consecDays(tmax<0, data=historic_covs, columnName = "MaxConsecTmaxSub0") %>% left_join(cherry, ., by=c("year", "location")) 
 
-cherry <- consecDays(tmin<0, columnName = "MaxOctConsecTminSub0", month=10) %>% left_join(cherry, ., by=c("year", "location")) 
-cherry <- consecDays(tmin<0, columnName = "MaxNovConsecTminSub0", month=11) %>% left_join(cherry, ., by=c("year", "location")) 
-cherry <- consecDays(tmin<0, columnName = "MaxDecConsecTminSub0", month=12) %>% left_join(cherry, ., by=c("year", "location")) 
+cherry <- consecDays(tmin<0, data=historic_covs, columnName = "MaxOctConsecTminSub0", month=10) %>% left_join(cherry, ., by=c("year", "location")) 
+cherry <- consecDays(tmin<0, data=historic_covs, columnName = "MaxNovConsecTminSub0", month=11) %>% left_join(cherry, ., by=c("year", "location")) 
+cherry <- consecDays(tmin<0, data=historic_covs, columnName = "MaxDecConsecTminSub0", month=12) %>% left_join(cherry, ., by=c("year", "location")) 
 
-cherry <- consecDays(tmin>0, columnName = "MaxJanConsecTminAbove0", month=1) %>% left_join(cherry, ., by=c("year", "location")) 
-cherry <- consecDays(tmin>0, columnName = "MaxFebConsecTminAbove0", month=2) %>% left_join(cherry, ., by=c("year", "location")) 
+cherry <- consecDays(tmin>0, data=historic_covs, columnName = "MaxJanConsecTminAbove0", month=1) %>% left_join(cherry, ., by=c("year", "location")) 
+cherry <- consecDays(tmin>0, data=historic_covs, columnName = "MaxFebConsecTminAbove0", month=2) %>% left_join(cherry, ., by=c("year", "location")) 
 
-cherry <- consecDays(tmax>10, columnName = "MaxJanConsecTmaxAbove10", month=1) %>% left_join(cherry, ., by=c("year", "location")) 
-cherry <- consecDays(tmax>10, columnName = "MaxFebConsecTmaxAbove10", month=2) %>% left_join(cherry, ., by=c("year", "location")) 
+cherry <- consecDays(tmax>10, data=historic_covs, columnName = "MaxJanConsecTmaxAbove10", month=1) %>% left_join(cherry, ., by=c("year", "location")) 
+cherry <- consecDays(tmax>10, data=historic_covs, columnName = "MaxFebConsecTmaxAbove10", month=2) %>% left_join(cherry, ., by=c("year", "location")) 
 
 
 cherry <- dplyr::filter(cherry, year>1953)
@@ -268,7 +149,205 @@ cherry <- dplyr::filter(cherry, location!="washingtondc" | year!=2002) #Missing 
 
 ```{r}
 #write.csv(cherry, file = "InitCovariates.csv", row.names = FALSE)
-
-#dat <- read.csv(file="ExCovariates.csv")
 ```
 
+################################################# Prediction Covariates
+
+```{r}
+future_covs <- read.table(file="../data/covariates/future_climate.txt")
+```
+
+Assign a "cherry year" to match winter weather with spring blooms. 
+```{r}
+future_covs <- dplyr::filter(future_covs, month <5 | month >8)
+future_covs$cherry_year <- 0
+
+future_covs$cherry_year[future_covs$month >8] <- future_covs$year[future_covs$month >8]+1
+future_covs$cherry_year[future_covs$month <8] <- future_covs$year[future_covs$month <8]
+```
+
+C_day as read in is unique integer identifier, where 1=Jan first. Below I reset to where September 1st is equal to 1, so that the climate dates relevant for a given bloom year are 1-243. 
+
+```{r}
+future_covs$C_day <- future_covs$C_day-243 #Set Sept1-Dec31 as 1-122
+future_covs$C_day[future_covs$C_day<0] <- future_covs$C_day[future_covs$C_day<0] - min(future_covs$C_day) + max(future_covs$C_day)  
+```
+
+Joining in 2021 winter data so we can predict 2022. 
+
+```{r}
+historic_covs <- read.table(file="../data/covariates/historic_climate.txt")
+
+future_covs <- dplyr::filter(historic_covs, year>=2021 & month >8) %>% mutate(., C_day=C_day-243, cherry_year=year+1) %>% rbind(., future_covs) #Add in 2021 Winter
+
+#As of right now, we only have spring dates from liestal and kyoto; I remove the predictions to take the actual data from historic
+future_covs <- dplyr::filter(future_covs, cherry_year!=2022 | location!="kyoto" | month != 1)
+future_covs <- dplyr::filter(future_covs, cherry_year!=2022 | location!="kyoto" | month != 2 | day >15)
+
+future_covs <- dplyr::filter(future_covs, cherry_year!=2022 | location!="vancouver" | month != 1)
+future_covs <- dplyr::filter(future_covs, cherry_year!=2022 | location!="vancouver" | month != 2 | day >15)
+
+future_covs <- dplyr::filter(historic_covs, year==2022) %>% mutate(., C_day=C_day+122, cherry_year=year) %>% rbind(., future_covs) #Add in 2022 Spring observations for Vancouver and Kyoto up to Feb 15th 
+```
+
+
+The stations we used for Washington DC and Liestal are both missing the most recent few months of data. The code below fills in those gaps with other, close-by stations. The replacement station for washington is <5km away from the original, and the replacement station for Liestal is <15km away from the original. 
+```{r}
+get_historic <- function (stationid, location, var) {
+  res<-vector(mode = 'list', length=length(stationid))
+  for(i in 1:length(stationid)){
+    aa<-as.data.frame(ghcnd_search(stationid = stationid[i], var = var,
+                                   date_min = "1950-01-01", date_max = "2022-02-15")[[1]])
+    aa['year']<-substr(x=aa$date, start = 1, stop = 4)
+    aa['month']<-as.numeric(substr(x=aa$date, start = 6, stop = 7))
+    aa['day']<-substr(x=aa$date, start = 9, stop = 10)
+    aa[which(aa$month==12),'month']<-0
+    aa['season']<-cut(as.numeric(aa$month), breaks = c(0, 2, 5, 8, 11),
+                      include.lowest = TRUE,
+                      labels = c("Winter", "Spring", "Summer", "Fall"))
+    aa[which(aa$month==0),'month']<-12
+    aa['C_day']<-strftime(aa$date, format = '%j')
+    aa['location']<-location[i]
+    res[[i]]<-aa
+  }
+  res<-do.call(rbind,res)
+  res<-res[,-c(4:6)]
+}
+
+rep_stationid<-c('USW00013743','SZ000001940')
+location<-c('washingtondc','liestal')
+historic_tmax<-get_historic(rep_stationid, location, var='tmax')
+historic_tmin<-get_historic(rep_stationid, location, var='tmin')
+historic_prcp<-get_historic(rep_stationid, location, var='prcp')
+historic_climate_alt<-historic_tmax
+historic_climate_alt['tmin']<-historic_tmin[match(paste(historic_climate_alt$location, historic_climate_alt$date),
+                                              paste(historic_tmin$location, historic_tmin$date)),'tmin']
+historic_climate_alt['prcp']<-historic_prcp[match(paste(historic_climate_alt$location, historic_climate_alt$date),
+                                              paste(historic_prcp$location, historic_prcp$date)),'prcp']
+historic_climate_alt<-historic_climate_alt[,-c(1,3)]
+
+historic_climate_alt<- dplyr::filter(historic_climate_alt, year > 2020)
+historic_climate_alt <- dplyr::filter(historic_climate_alt, location!= "washingtondc" | month > 10 | year > 2021) #Remove everything but the correct washington series
+
+historic_climate_alt <- dplyr::filter(historic_climate_alt, location!= "liestal" | year > 2021) #Remove everything but the correct liestal series
+
+
+historic_climate_alt$tmax <- historic_climate_alt$tmax/10
+historic_climate_alt$tmin <- historic_climate_alt$tmin/10
+historic_climate_alt$year <- as.numeric(historic_climate_alt$year)
+historic_climate_alt$cherry_year <- 2022 #All our missing data is relevant to the 2022 prediction year
+
+historic_climate_alt$C_day <- as.numeric(historic_climate_alt$C_day)
+
+historic_climate_alt$C_day[historic_climate_alt$month > 7] <- historic_climate_alt$C_day[historic_climate_alt$month > 7]-243
+
+historic_climate_alt$C_day[historic_climate_alt$month < 7] <- historic_climate_alt$C_day[historic_climate_alt$month < 7]+122
+```
+
+Here we cut out the predicted values for those sites and replace them with the close site.s 
+
+```{r}
+future_covs <- dplyr::filter(future_covs, location != "washingtondc" | C_day < 62 | C_day > 168| cherry_year > 2022) #Take out all Washington dates pre Feb 16th, 2022
+
+future_covs <- dplyr::filter(future_covs, location != "liestal" | C_day > 168 | C_day <123 | cherry_year > 2022)  #Take out prediction dates for Liestal
+
+future_covs <- rbind(future_covs, historic_climate_alt)
+```
+
+
+Create features
+
+
+```{r}
+cherryPreds <- expand(future_covs, location, cherry_year)
+colnames(cherryPreds) <- c("location", "year")
+cherryPreds <- dplyr::filter(cherryPreds, year!=2033)
+
+## Above
+### Total Time Series
+cherryPreds <- countDays(tmax>0, data=future_covs, columnName = "TmaxDaysAbove0") %>% left_join(cherryPreds, ., by=c("year", "location")) 
+cherryPreds <- countDays(tmax>5, data=future_covs, columnName = "TmaxDaysAbove5") %>% left_join(cherryPreds, ., by=c("year", "location")) 
+cherryPreds <- countDays(tmax>10, data=future_covs, columnName = "TmaxDaysAbove10") %>% left_join(cherryPreds, ., by=c("year", "location")) 
+cherryPreds <- countDays(tmax>20, data=future_covs, columnName = "TmaxDaysAbove20") %>% left_join(cherryPreds, ., by=c("year", "location")) 
+cherryPreds <- countDays(tmax>25, data=future_covs, columnName = "TmaxDaysAbove25") %>% left_join(cherryPreds, ., by=c("year", "location")) 
+
+cherryPreds <- countDays(tmin>0, data=future_covs, columnName = "TminDaysAbove0") %>% left_join(cherryPreds, ., by=c("year", "location")) 
+cherryPreds <- countDays(tmin>5, data=future_covs, columnName = "TminDaysAbove5") %>% left_join(cherryPreds, ., by=c("year", "location")) 
+cherryPreds <- countDays(tmin>10, data=future_covs, columnName = "TminDaysAbove10") %>% left_join(cherryPreds, ., by=c("year", "location")) 
+
+cherryPreds <- countDays(prcp>0, data=future_covs, columnName = "PrcpDays") %>% left_join(cherryPreds, ., by=c("year", "location")) 
+
+### Months
+cherryPreds <- countDays(tmax>0, data=future_covs, columnName = "TmaxDecAbove0", month=12) %>% left_join(cherryPreds, ., by=c("year", "location")) 
+cherryPreds <- countDays(tmax>0, data=future_covs, columnName = "TmaxJanAbove0", month=1) %>% left_join(cherryPreds, ., by=c("year", "location")) 
+cherryPreds <- countDays(tmax>0, data=future_covs, columnName = "TmaxFebAbove0", month=12) %>% left_join(cherryPreds, ., by=c("year", "location")) 
+
+cherryPreds <- countDays(prcp>0, data=future_covs, columnName = "DecPrcpDays", month=12) %>% left_join(cherryPreds, ., by=c("year", "location")) 
+cherryPreds <- countDays(prcp>0, data=future_covs, columnName = "JanPrcpDays", month=1) %>% left_join(cherryPreds, ., by=c("year", "location")) 
+cherryPreds <- countDays(prcp>0, data=future_covs, columnName = "FebPrcpDays", month=2) %>% left_join(cherryPreds, ., by=c("year", "location")) 
+
+
+## Below
+cherryPreds <- countDays(tmax<0, data=future_covs, columnName = "TmaxDaysSub0") %>% left_join(cherryPreds, ., by=c("year", "location")) 
+cherryPreds <- countDays(tmax<5, data=future_covs, columnName = "TmaxDaysSub5") %>% left_join(cherryPreds, ., by=c("year", "location")) 
+cherryPreds <- countDays(tmax<10, data=future_covs, columnName = "TmaxDaysSub10") %>% left_join(cherryPreds, ., by=c("year", "location")) 
+cherryPreds <- countDays(tmax<20, data=future_covs, columnName = "TmaxDaysSub20") %>% left_join(cherryPreds, ., by=c("year", "location")) 
+cherryPreds <- countDays(tmax<25, data=future_covs, columnName = "TmaxDaysSub25") %>% left_join(cherryPreds, ., by=c("year", "location")) 
+
+cherryPreds <- countDays(tmin<0, data=future_covs, columnName = "TminDaysSub0") %>% left_join(cherryPreds, ., by=c("year", "location")) 
+cherryPreds <- countDays(tmin<5, data=future_covs, columnName = "TminDaysSub5") %>% left_join(cherryPreds, ., by=c("year", "location")) 
+cherryPreds <- countDays(tmin<8, data=future_covs, columnName = "TminDaysSub8") %>% left_join(cherryPreds, ., by=c("year", "location")) 
+cherryPreds <- countDays(tmin<10, data=future_covs, columnName = "TminDaysSub10") %>% left_join(cherryPreds, ., by=c("year", "location")) 
+
+#First Day Thresholds
+#Full Time Series
+cherryPreds <- firstDay(tmax<7, data=future_covs, columnName = "FirstTmaxSub7") %>% left_join(cherryPreds, ., by=c("year", "location")) 
+cherryPreds <- firstDay(tmin<0, data=future_covs, columnName = "FirstTminFreeze") %>% left_join(cherryPreds, ., by=c("year", "location")) 
+
+
+### Months
+cherryPreds <- firstDay(tmax>4, data=future_covs, columnName = "FirstJanTmaxAbove4", month=1) %>% left_join(cherryPreds, ., by=c("year", "location")) 
+cherryPreds <- firstDay(tmax>5, data=future_covs, columnName = "FirstFebTmaxAbove5", month=2) %>% left_join(cherryPreds, ., by=c("year", "location")) 
+
+cherryPreds <- firstDay(tmin>(-1), data=future_covs, columnName = "FirstJanTminAboveNeg1", month=1) %>% left_join(cherryPreds, ., by=c("year", "location")) 
+cherryPreds <- firstDay(tmin>(-2), data=future_covs, columnName = "FirstFebTminAboveNeg2", month=2) %>% left_join(cherryPreds, ., by=c("year", "location")) 
+
+
+#Max consec Thresholds
+cherryPreds <- consecDays(tmin<0, data=future_covs, columnName = "MaxConsecTminSub0") %>% left_join(cherryPreds, ., by=c("year", "location")) 
+cherryPreds <- consecDays(tmax<0, data=future_covs, columnName = "MaxConsecTmaxSub0") %>% left_join(cherryPreds, ., by=c("year", "location")) 
+
+cherryPreds <- consecDays(tmin<0, data=future_covs, columnName = "MaxOctConsecTminSub0", month=10) %>% left_join(cherryPreds, ., by=c("year", "location")) 
+cherryPreds <- consecDays(tmin<0, data=future_covs, columnName = "MaxNovConsecTminSub0", month=11) %>% left_join(cherryPreds, ., by=c("year", "location")) 
+cherryPreds <- consecDays(tmin<0, data=future_covs, columnName = "MaxDecConsecTminSub0", month=12) %>% left_join(cherryPreds, ., by=c("year", "location")) 
+
+cherryPreds <- consecDays(tmin>0, data=future_covs, columnName = "MaxJanConsecTminAbove0", month=1) %>% left_join(cherryPreds, ., by=c("year", "location")) 
+cherryPreds <- consecDays(tmin>0, data=future_covs, columnName = "MaxFebConsecTminAbove0", month=2) %>% left_join(cherryPreds, ., by=c("year", "location")) 
+
+cherryPreds <- consecDays(tmax>10, data=future_covs, columnName = "MaxJanConsecTmaxAbove10", month=1) %>% left_join(cherryPreds, ., by=c("year", "location")) 
+cherryPreds <- consecDays(tmax>10, data=future_covs, columnName = "MaxFebConsecTmaxAbove10", month=2) %>% left_join(cherryPreds, ., by=c("year", "location")) 
+```
+
+NA Interpolation. 
+```{r}
+table(is.na(cherryPreds))
+
+for(i in 8:ncol(cherryPreds)){
+  for(j in 1:length(unique(cherryPreds$location)))
+  cherryPreds[which(cherryPreds$location==unique(cherryPreds$location)[j]),i] <- zoo::na.approx(cherryPreds[which(cherryPreds$location==unique(cherryPreds$location)[j]),i], rule=2)
+}
+table(is.na(cherryPreds))
+```
+
+```{r eval=FALSE}
+#write.csv(cherryPreds, file = "PredictionCovariates.csv", row.names = FALSE)
+```
+
+Look for close-by stations (how we found alternative stations used above)
+```{r eval=FALSE}
+DC_latlong <- data.frame("latitude"=38.88535, "longitude"=-77.038628, "id"="DC")
+DC_Stations <- rnoaa::meteo_nearby_stations(DC_latlong, year_min = 2021, year_max=2022)
+
+Lie_latlong <- data.frame("latitude"=47.4814, "longitude"=	7.730519, "id"="DC")
+Lie_Stations <- rnoaa::meteo_nearby_stations(Lie_latlong, year_min = 2021, year_max=2022)
+```

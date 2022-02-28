@@ -10,6 +10,8 @@ knitr::opts_chunk$set(echo = TRUE)
 ```
 
 
+
+##################Prediction Features
 ```{r}
 source("FeatureFunctions.R")
 library(tidyverse)
@@ -212,13 +214,11 @@ table(is.na(cherryPreds))
 ```
 
 Look for close-by stations (how we found alternative stations used above)
-```{r}
+```{r eval=FALSE}
 DC_latlong <- data.frame("latitude"=38.88535, "longitude"=-77.038628, "id"="DC")
 DC_Stations <- rnoaa::meteo_nearby_stations(DC_latlong, year_min = 2021, year_max=2022)
 
 Lie_latlong <- data.frame("latitude"=47.4814, "longitude"=	7.730519, "id"="DC")
 Lie_Stations <- rnoaa::meteo_nearby_stations(Lie_latlong, year_min = 2021, year_max=2022)
 ```
-
-
 
