@@ -10,9 +10,10 @@ In order to reproduce our data handling, analyses, and output you will have to r
 2. `Features.Rmd` This code constructs a large number of covariates or features for model training from the raw daily weather data. These features are largely based on calculating the number of days which do or do not exceed a range of temperature thresholds over set time periods.
 3. `model_fitting.Rmd` This code tunes, trains, and evaluates models, measures variable importance and produces forecasting predictions.
 
-
+<p align =center>
 ![Past and predicted peak bloom dates (days since January 1st) for the competition sites (Kyoto, Liestal−Weideli, Vancouver, Washington DC). Past data are plotted in a gray and have been represented from 1900 to 2021, though for Kyoto the data extends back to 1812 and for Vancouver there is no historic data. Predicted peak bloom dates from the ensemble model are represented in pink for each site spanning 2022-2032.](https://raw.github.com/dallasLab/peak-bloom-prediction/main/figures/time_seriesPlot.png)
-
+</p>
+  
 Past and predicted peak bloom dates (days since January 1st) for the competition sites (Kyoto, Liestal−Weideli, Vancouver, Washington DC). Past data are plotted in a gray and have been represented from 1900 to 2021, though for Kyoto the data extends back to 1812 and for Vancouver there is no historic data. Predicted peak bloom dates from the ensemble model are represented in pink for each site spanning 2022-2032.
 
 
