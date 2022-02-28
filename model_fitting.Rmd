@@ -34,19 +34,6 @@ library(kernlab)
 
 ## Loading the data
 
-The data for each of the three main sites is provided as simple text file in CSV format.
-Each file contains the dates of the peak bloom of the cherry trees at the respective site, alongside the geographical location of the site.
-
-The six columns in each data file are
-
-* _location_ a human-readable location identifier (`string`).
-* _lat_ (approximate) latitude of the cherry trees (`double`).
-* _long_ (approximate) longitude of the cherry trees (`double`).
-* _alt_ (approximate) altitude of the cherry trees (`double`).
-* _year_ year of the observation (`integer`).
-* *bloom_date* date of peak bloom of the cherry trees (ISO 8601 date `string`). The "peak bloom date" may be defined differently for different sites
-* *bloom_doy* days since January 1st of the year until peak bloom (`integer`). January 1st corresponds to `1`.
-* We convert the _location_ variable to a set of dummy variables for each location (We set Vancouver's location equivalent to DC because they share a species and peak threshold)
 
 ```{r}
 
@@ -291,10 +278,8 @@ predictions_noBadVars <- bind_cols(location = future_cherry$location, year = fut
 
 write.csv(predictions_noBadVars, "cherry_predictions.csv")
 
-
-
-
-
+# Produce time series figure of past data and predictions
+source("Time_series.R")
 
 ```
 
