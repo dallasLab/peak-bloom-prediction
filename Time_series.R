@@ -26,7 +26,7 @@ observations <- rbind(kyoto, liestal, washingtondc) %>%
 all_doys <- rbind(observations, predictions) 
 
 # Modify labels for plot
-locations_labs <- c("Kyoto", "Liestal", "Vancouver", "Washington DC")
+locations_labs <- c("Kyoto", "Liestal-Weideli", "Vancouver", "Washington DC")
 names(locations_labs) <- c("kyoto", "liestal", "vancouver", "washingtondc")
 
 # Plot the time series of past and predicted data for each location
