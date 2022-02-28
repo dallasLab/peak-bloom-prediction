@@ -1,6 +1,6 @@
 ---
 title: "Peak Bloom Prediction Demo"
-author: "Eager Learner"
+author: "Dallas Lab"
 date: "01/01/2022"
 output:
   html_document:
@@ -18,11 +18,17 @@ knitr::opts_chunk$set(echo = TRUE, warning = FALSE, error = FALSE,
 ```{r}
 # Load packages
 library(tidyverse)
-library(caret)
 library(caretEnsemble)
 library(doParallel)
 library(wesanderson)
 
+library(caret)
+# Caret component models
+library(gbm)
+library(randomForest)
+library(elasticnet)
+library(xgboost)
+library(kernlab)
 ```
 
 
@@ -117,7 +123,7 @@ tuneGridGBM <- expand.grid(interaction.depth = c(1,3,5),n.trees = (5:10)*100, sh
 model_types <- list(gbm = caretModelSpec(method = "gbm", verbose =F, tuneGrid = tuneGridGBM),
                     rf = caretModelSpec(method = "rf"),
                     lasso= caretModelSpec(method = "lasso"),
-                    ridge = caretModelSpec(method = "foba"),
+                    ridge = caretModelSpec(method = "ridge"),
                     xgBoost = caretModelSpec(method = "xgbTree", verbose =0),
                     svm = caretModelSpec(method = "svmLinear"),
                     enet = caretModelSpec(method = "enet"))
@@ -241,7 +247,7 @@ impPlot <- inflDf %>%
                              TRUE ~ "Other"),
          vartype = factor(vartype, levels = c("Annual Temperature", "Monthly Temperature", "Precipitation", "Other"))) %>%
   ggplot(aes(y = reorder(vars, Infl), x = Infl, fill = vartype)) +
-  geom_col()+
+  geom_col()+  
   theme_minimal()+
   xlab("Delta RMSE") +
   ylab("Covariate") +
