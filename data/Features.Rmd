@@ -24,7 +24,7 @@ cherry <- read.csv("../data/washingtondc.csv") %>%
 
 cherry <- dplyr::filter(cherry, year >1950)
 
-cherry$bloom_doy <- cherry$bloom_doy + 188 #Set Bloom day to be as same scale as climate data
+cherry$bloom_doy <- cherry$bloom_doy + 122 #Set Bloom day to be as same scale as climate data
 
 cherry2 <- cherry
 ```
